@@ -2,7 +2,6 @@ import { Elysia } from "elysia";
 import { z } from "zod";
 import { openapi } from "@elysiajs/openapi";
 import { staticPlugin } from "@elysiajs/static";
-import { existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import toTaipeiDateTime from "./util.ts";
 import {
@@ -55,8 +54,7 @@ function getLocalIP(): string {
 }
 const store = createStore({ dataFilePath: "./data/store.json" });
 const auth = createAuth({ dataFilePath: "./data/store.json" });
-const hasPublicAssets =
-  existsSync("./public") && existsSync("./public/index.html");
+const hasPublicAssets = await Bun.file("./public/index.html").exists();
 
 const app = new Elysia();
 
