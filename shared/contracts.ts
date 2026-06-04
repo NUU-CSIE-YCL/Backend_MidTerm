@@ -5,12 +5,20 @@ import { z } from "zod";
 // 型別（TypeScript type）由 Zod schema 自動推導，不需要手動維護兩份。
 
 export const menuItemSchema = z.object({
-  id: z.number().int().min(1),
+  id: z.string().min(1),
+  entityId: z.string().min(1),
+  logicalId: z.string().min(1),
+  version: z.number().int().min(1),
   name: z.string().min(1),
   price: z.number().min(0),
   category: z.string().min(1),
   description: z.string(),
   image_url: z.string().min(1),
+  isCurrentVersion: z.boolean(),
+  supersedes: z.string().min(1).nullable().optional(),
+  changeReason: z.string().nullable().optional(),
+  createdAt: z.string().min(1).optional(),
+  createdBy: z.string().min(1).optional(),
 });
 
 export const sessionUserSchema = z.object({

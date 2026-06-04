@@ -37,16 +37,18 @@ export function toOrderResponse(order: Order): OrderResponse {
 
 /** POST /api/menu */
 export const createMenuItemBodySchema = z.object({
+  logical_id: z.string().min(1).optional(),
   name: z.string().min(1),
   price: z.number().int().min(0),
   category: z.string().min(1),
   description: z.string().min(1),
   image_url: z.string().min(1),
+  change_reason: z.string().min(1).optional(),
 });
 
 /** PATCH /api/menu/:id */
 export const updateMenuItemParamsSchema = z.object({
-  id: z.string().regex(/^[0-9]+$/),
+  id: z.string().min(1),
 });
 
 export const updateMenuItemBodySchema = z.object({
@@ -55,11 +57,12 @@ export const updateMenuItemBodySchema = z.object({
   category: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
   image_url: z.string().min(1).optional(),
+  change_reason: z.string().min(1).optional(),
 });
 
 /** DELETE /api/menu/:id */
 export const deleteMenuItemParamsSchema = z.object({
-  id: z.string().regex(/^[0-9]+$/),
+  id: z.string().min(1),
 });
 
 /** GET /api/orders/:id */
@@ -73,7 +76,7 @@ export const updateOrderParamsSchema = z.object({
 });
 
 export const updateOrderBodySchema = z.object({
-  itemId: z.number().int().min(1),
+  itemId: z.string().min(1),
   qty: z.number().min(0),
 });
 

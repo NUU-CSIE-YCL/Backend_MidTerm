@@ -2,6 +2,10 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { MenuItem, Order, OrderItem } from "../../shared/contracts.ts";
 import { db } from "../../db/client.ts";
 import {
+  menuRepository,
+  toMenuItem,
+} from "../../db/repositories/menuRepository.ts";
+import {
   menuItemsTable,
   orderItemsTable,
   ordersTable,
@@ -13,9 +17,18 @@ interface PgStoreOptions {
 }
 
 // Seed 用的內部型別（來自 data/store.json）
-// V9: 只播 menu，users 由 Better Auth 管理，orders 需真實 session 才能建立
+// V10: 只播 menu，users 由 Better Auth 管理，orders 需真實 session 才能建立
+interface SeedMenuItem {
+  id?: number | string;
+  name: string;
+  price: number;
+  category: string;
+  description: string;
+  image_url: string;
+}
+
 interface SeedData {
-  menu?: MenuItem[];
+  menu?: SeedMenuItem[];
   orders?: Array<{
     id: number;
     userId: string | number;
@@ -53,97 +66,51 @@ export class PgStore implements Store {
   }
 
   async createMenuItem(input: {
+    logical_id?: string;
     name: string;
     price: number;
     category: string;
     description: string;
     image_url: string;
+    change_reason?: string;
   }): Promise<MenuItem> {
-    const [inserted] = await db
-      .insert(menuItemsTable)
-      .values({
-        name: input.name,
-        price: input.price,
-        category: input.category,
-        description: input.description,
-        imageUrl: input.image_url,
-      })
-      .returning();
-
-    if (!inserted) throw new Error("Failed to insert menu item");
-
-    const created: MenuItem = {
-      id: inserted.id,
-      name: inserted.name,
-      price: inserted.price,
-      category: inserted.category,
-      description: inserted.description,
-      image_url: inserted.imageUrl,
-    };
-
+    const created = await menuRepository.createMenuItem(input, "system");
     this.menu.push(created);
     return created;
   }
 
   async updateMenuItem(
-    menuId: number,
+    menuId: string,
     patch: {
       name?: string;
       price?: number;
       category?: string;
       description?: string;
       image_url?: string;
+      change_reason?: string;
     },
   ): Promise<MenuItem | null> {
-    const [updated] = await db
-      .update(menuItemsTable)
-      .set({
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.price !== undefined ? { price: patch.price } : {}),
-        ...(patch.category !== undefined ? { category: patch.category } : {}),
-        ...(patch.description !== undefined
-          ? { description: patch.description }
-          : {}),
-        ...(patch.image_url !== undefined ? { imageUrl: patch.image_url } : {}),
-      })
-      .where(eq(menuItemsTable.id, menuId))
-      .returning();
+    const next = await menuRepository.updateMenuItemVersion(
+      menuId,
+      patch,
+      "system",
+    );
+    if (!next) return null;
 
-    if (!updated) return null;
-
-    const next: MenuItem = {
-      id: updated.id,
-      name: updated.name,
-      price: updated.price,
-      category: updated.category,
-      description: updated.description,
-      image_url: updated.imageUrl,
-    };
-
-    const idx = this.menu.findIndex((item) => item.id === menuId);
+    const idx = this.menu.findIndex((item) => item.logicalId === next.logicalId);
     if (idx !== -1) this.menu[idx] = next;
+    else this.menu.push(next);
 
     return next;
   }
 
-  async deleteMenuItem(menuId: number): Promise<MenuItem | null> {
-    const [removed] = await db
-      .delete(menuItemsTable)
-      .where(eq(menuItemsTable.id, menuId))
-      .returning();
+  async deleteMenuItem(menuId: string): Promise<MenuItem | null> {
+    const removedItem = await menuRepository.retireCurrentVersion(menuId);
+    if (!removedItem) return null;
 
-    if (!removed) return null;
-
-    const removedItem: MenuItem = {
-      id: removed.id,
-      name: removed.name,
-      price: removed.price,
-      category: removed.category,
-      description: removed.description,
-      image_url: removed.imageUrl,
-    };
-
-    const idx = this.menu.findIndex((item) => item.id === menuId);
+    const idx = this.menu.findIndex(
+      (item) => item.logicalId === removedItem.logicalId,
+    );
     if (idx !== -1) this.menu.splice(idx, 1);
 
     return removedItem;
@@ -211,7 +178,7 @@ export class PgStore implements Store {
 
   async updateOrderItem(
     orderId: number,
-    input: { userId: string; itemId: number; qty: number },
+    input: { userId: string; itemId: string; qty: number },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -219,6 +186,7 @@ export class PgStore implements Store {
         code:
           | "ORDER_NOT_FOUND"
           | "MENU_ITEM_NOT_FOUND"
+          | "MENU_ITEM_NOT_CURRENT"
           | "ORDER_NOT_OWNED"
           | "ORDER_NOT_EDITABLE";
       }
@@ -230,46 +198,52 @@ export class PgStore implements Store {
     if (order.status !== "pending")
       return { ok: false, code: "ORDER_NOT_EDITABLE" };
 
-    const menuItem = this.menu.find((item) => item.id === input.itemId);
-    if (!menuItem) return { ok: false, code: "MENU_ITEM_NOT_FOUND" };
-
     const existingIdx = order.items.findIndex(
       (oi) => oi.item.id === input.itemId,
     );
 
-    if (existingIdx !== -1) {
-      if (input.qty === 0) {
+    if (input.qty === 0) {
+      if (existingIdx !== -1) {
         await db
           .delete(orderItemsTable)
           .where(
             and(
               eq(orderItemsTable.orderId, orderId),
-              eq(orderItemsTable.itemId, input.itemId),
+              eq(orderItemsTable.menuItemId, input.itemId),
             ),
           );
         order.items.splice(existingIdx, 1);
-      } else {
-        await db
-          .update(orderItemsTable)
-          .set({ qty: input.qty })
-          .where(
-            and(
-              eq(orderItemsTable.orderId, orderId),
-              eq(orderItemsTable.itemId, input.itemId),
-            ),
-          );
-        const target = order.items[existingIdx];
-        if (target) target.qty = input.qty;
       }
-    } else if (input.qty > 0) {
+      order.total = calculateTotal(order.items);
+      await db
+        .update(ordersTable)
+        .set({ total: order.total })
+        .where(eq(ordersTable.id, orderId));
+
+      return { ok: true, order };
+    }
+
+    const menuItem = await menuRepository.getMenuVersion(input.itemId);
+    if (!menuItem) return { ok: false, code: "MENU_ITEM_NOT_FOUND" };
+    if (!menuItem.isCurrentVersion)
+      return { ok: false, code: "MENU_ITEM_NOT_CURRENT" };
+
+    if (existingIdx !== -1) {
+      await db
+        .update(orderItemsTable)
+        .set({ qty: input.qty })
+        .where(
+          and(
+            eq(orderItemsTable.orderId, orderId),
+            eq(orderItemsTable.menuItemId, input.itemId),
+          ),
+        );
+      const target = order.items[existingIdx];
+      if (target) target.qty = input.qty;
+    } else {
       await db.insert(orderItemsTable).values({
         orderId,
-        itemId: menuItem.id,
-        name: menuItem.name,
-        price: menuItem.price,
-        category: menuItem.category,
-        description: menuItem.description,
-        imageUrl: menuItem.image_url,
+        menuItemId: menuItem.id,
         qty: input.qty,
       });
       order.items.push({ item: { ...menuItem }, qty: input.qty });
@@ -295,7 +269,8 @@ export class PgStore implements Store {
           | "ORDER_NOT_FOUND"
           | "ORDER_NOT_OWNED"
           | "ORDER_NOT_EDITABLE"
-          | "EMPTY_ORDER";
+          | "EMPTY_ORDER"
+          | "MENU_ITEM_NOT_CURRENT";
       }
   > {
     const order = this.orders.find((o) => o.id === orderId);
@@ -305,6 +280,13 @@ export class PgStore implements Store {
     if (order.status !== "pending")
       return { ok: false, code: "ORDER_NOT_EDITABLE" };
     if (order.items.length === 0) return { ok: false, code: "EMPTY_ORDER" };
+
+    const validation = await menuRepository.validateMenuItemsAreCurrent(
+      order.items.map((item) => item.item.id),
+    );
+    if (!validation.valid) {
+      return { ok: false, code: "MENU_ITEM_NOT_CURRENT" };
+    }
 
     const submittedAt = new Date().toISOString();
 
@@ -336,32 +318,41 @@ export class PgStore implements Store {
 
     if (menu.length > 0) {
       await db.insert(menuItemsTable).values(
-        menu.map((item) => ({
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          category: item.category,
-          description: item.description,
-          imageUrl: item.image_url,
-        })),
+        menu.map((item, index) => {
+          const logicalId =
+            typeof item.id === "number"
+              ? String(item.id).padStart(3, "0")
+              : item.id?.includes("-")
+                ? item.id.split("-")[0]!
+                : item.id ?? String(index + 1).padStart(3, "0");
+
+          return {
+            id: `${logicalId}-01`,
+            entityId: crypto.randomUUID(),
+            logicalId,
+            version: 1,
+            name: item.name,
+            price: item.price,
+            category: item.category,
+            description: item.description,
+            imageUrl: item.image_url,
+            isCurrentVersion: true,
+            changeReason: "Initial seed",
+            createdBy: "system",
+          };
+        }),
       );
     }
 
-    // V9: 不再播 orders seed data（orders 的 user_id FK 指向 Better Auth user 表，
-    // seed JSON 中的舊 userId 在 bf_v9.user 不存在，強制播入會觸發 FK violation）
-
-    const schema = process.env.PG_SCHEMA ?? "public";
-    await db.execute(
-      sql.raw(
-        `select setval('${schema}.menu_items_id_seq', coalesce((select max(id) from ${schema}.menu_items), 1), true)`,
-      ),
-    );
+    // V10: 不再播 orders seed data（orders 的 user_id FK 指向 Better Auth user 表，
+    // seed JSON 中的舊 userId 在 bf_v10.user 不存在，強制播入會觸發 FK violation）
   }
 
   private async reloadFromDatabase(): Promise<void> {
     const menuRows = await db
       .select()
       .from(menuItemsTable)
+      .where(eq(menuItemsTable.isCurrentVersion, true))
       .orderBy(asc(menuItemsTable.id));
 
     const orderRows = await db
@@ -370,30 +361,57 @@ export class PgStore implements Store {
       .orderBy(desc(ordersTable.createdAt), desc(ordersTable.id));
 
     const orderItemRows = await db
-      .select()
+      .select({
+        id: orderItemsTable.id,
+        orderId: orderItemsTable.orderId,
+        menuItemId: orderItemsTable.menuItemId,
+        qty: orderItemsTable.qty,
+        menuId: menuItemsTable.id,
+        entityId: menuItemsTable.entityId,
+        logicalId: menuItemsTable.logicalId,
+        version: menuItemsTable.version,
+        name: menuItemsTable.name,
+        price: menuItemsTable.price,
+        category: menuItemsTable.category,
+        description: menuItemsTable.description,
+        imageUrl: menuItemsTable.imageUrl,
+        isCurrentVersion: menuItemsTable.isCurrentVersion,
+        supersedes: menuItemsTable.supersedes,
+        changeReason: menuItemsTable.changeReason,
+        createdAt: menuItemsTable.createdAt,
+        createdBy: menuItemsTable.createdBy,
+      })
       .from(orderItemsTable)
+      .innerJoin(
+        menuItemsTable,
+        eq(orderItemsTable.menuItemId, menuItemsTable.id),
+      )
       .orderBy(asc(orderItemsTable.id));
 
-    this.menu = menuRows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      price: row.price,
-      category: row.category,
-      description: row.description,
-      image_url: row.imageUrl,
-    }));
+    this.menu = menuRows.map(toMenuItem);
 
     const itemsByOrderId = new Map<number, OrderItem[]>();
     for (const row of orderItemRows) {
       const items = itemsByOrderId.get(row.orderId) ?? [];
       items.push({
         item: {
-          id: row.itemId,
+          id: row.menuId,
+          entityId: row.entityId,
+          logicalId: row.logicalId,
+          version: row.version,
           name: row.name,
           price: row.price,
           category: row.category,
           description: row.description,
           image_url: row.imageUrl,
+          isCurrentVersion: row.isCurrentVersion,
+          supersedes: row.supersedes,
+          changeReason: row.changeReason,
+          createdAt:
+            row.createdAt instanceof Date
+              ? row.createdAt.toISOString()
+              : new Date(row.createdAt).toISOString(),
+          createdBy: row.createdBy,
         },
         qty: row.qty,
       });

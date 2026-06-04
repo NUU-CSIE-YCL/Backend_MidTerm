@@ -151,7 +151,9 @@ app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
 app.post(
   "/api/menu",
   async ({ body, set }) => {
-    const newMenuItem = await store.createMenuItem(body);
+    const newMenuItem = await store.createMenuItem(
+      body as Parameters<typeof store.createMenuItem>[0],
+    );
     set.status = 201;
     return { data: newMenuItem };
   },
@@ -171,8 +173,7 @@ app.post(
 app.patch(
   "/api/menu/:id",
   async ({ params, body, set }) => {
-    const menuId = parseInt(params.id);
-    const menuItem = await store.updateMenuItem(menuId, body);
+    const menuItem = await store.updateMenuItem(params.id, body);
 
     if (!menuItem) {
       set.status = 404;
@@ -199,8 +200,7 @@ app.patch(
 app.delete(
   "/api/menu/:id",
   async ({ params, set }) => {
-    const menuId = parseInt(params.id);
-    const removedMenuItem = await store.deleteMenuItem(menuId);
+    const removedMenuItem = await store.deleteMenuItem(params.id);
 
     if (!removedMenuItem) {
       set.status = 404;
@@ -357,38 +357,40 @@ app.patch(
   async ({ params, body, request, set }) => {
     const user = await requireUser(request);
     const orderId = parseInt(params.id);
+    const orderPatch = body as { itemId: string; qty: number };
     const result = await store.updateOrderItem(orderId, {
       userId: user.id,
-      itemId: body.itemId,
-      qty: body.qty,
+      itemId: orderPatch.itemId,
+      qty: orderPatch.qty,
     });
 
-    if (!result.ok && result.code === "ORDER_NOT_FOUND") {
-      set.status = 404;
-      return { error: "Order not found" };
+    if (!("code" in result)) {
+      return { data: toOrderResponse(result.order) };
     }
 
-    if (!result.ok && result.code === "MENU_ITEM_NOT_FOUND") {
-      set.status = 404;
-      return { error: "Menu item not found" };
+    switch (result.code) {
+      case "ORDER_NOT_FOUND":
+        set.status = 404;
+        return { error: "Order not found" };
+      case "MENU_ITEM_NOT_FOUND":
+        set.status = 404;
+        return { error: "Menu item not found" };
+      case "MENU_ITEM_NOT_CURRENT":
+        set.status = 409;
+        return {
+          error: "Menu item is no longer current",
+          message: "Please refresh the menu and update your cart.",
+        };
+      case "ORDER_NOT_OWNED":
+        set.status = 403;
+        return { error: "Forbidden" };
+      case "ORDER_NOT_EDITABLE":
+        set.status = 409;
+        return { error: "Order is not editable" };
+      default:
+        set.status = 500;
+        return { error: "Unexpected store state" };
     }
-
-    if (!result.ok && result.code === "ORDER_NOT_OWNED") {
-      set.status = 403;
-      return { error: "Forbidden" };
-    }
-
-    if (!result.ok && result.code === "ORDER_NOT_EDITABLE") {
-      set.status = 409;
-      return { error: "Order is not editable" };
-    }
-
-    if (!result.ok) {
-      set.status = 500;
-      return { error: "Unexpected store state" };
-    }
-
-    return { data: toOrderResponse(result.order) };
   },
   {
     params: updateOrderParamsSchema,
@@ -417,32 +419,33 @@ app.post(
     const orderId = parseInt(params.id, 10);
     const result = await store.submitOrder(orderId, { userId: user.id });
 
-    if (!result.ok && result.code === "ORDER_NOT_FOUND") {
-      set.status = 404;
-      return { error: "Order not found" };
+    if (!("code" in result)) {
+      return { data: toOrderResponse(result.order) };
     }
 
-    if (!result.ok && result.code === "ORDER_NOT_OWNED") {
-      set.status = 403;
-      return { error: "Forbidden" };
+    switch (result.code) {
+      case "ORDER_NOT_FOUND":
+        set.status = 404;
+        return { error: "Order not found" };
+      case "ORDER_NOT_OWNED":
+        set.status = 403;
+        return { error: "Forbidden" };
+      case "ORDER_NOT_EDITABLE":
+        set.status = 409;
+        return { error: "Order already submitted" };
+      case "EMPTY_ORDER":
+        set.status = 400;
+        return { error: "Empty order cannot be submitted" };
+      case "MENU_ITEM_NOT_CURRENT":
+        set.status = 409;
+        return {
+          error: "Cart contains outdated menu items",
+          message: "Please refresh the menu and update your cart.",
+        };
+      default:
+        set.status = 500;
+        return { error: "Unexpected store state" };
     }
-
-    if (!result.ok && result.code === "ORDER_NOT_EDITABLE") {
-      set.status = 409;
-      return { error: "Order already submitted" };
-    }
-
-    if (!result.ok && result.code === "EMPTY_ORDER") {
-      set.status = 400;
-      return { error: "Empty order cannot be submitted" };
-    }
-
-    if (!result.ok) {
-      set.status = 500;
-      return { error: "Unexpected store state" };
-    }
-
-    return { data: toOrderResponse(result.order) };
   },
   {
     params: submitOrderParamsSchema,

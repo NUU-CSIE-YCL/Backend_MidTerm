@@ -22,7 +22,11 @@ if (!DATABASE_URL) {
   process.exit(1);
 }
 
-const DRIZZLE_DIR = join(import.meta.dir, "..", "drizzle");
+const DRIZZLE_DIR = join(
+  import.meta.dir,
+  "..",
+  process.env.DRIZZLE_MIGRATIONS_DIR ?? "drizzle-v10",
+);
 const JOURNAL_PATH = join(DRIZZLE_DIR, "meta", "_journal.json");
 
 interface JournalEntry {
@@ -56,7 +60,7 @@ async function main() {
     `);
 
     // 建立應用 schema（若不存在）
-    const pgSchema = process.env.PG_SCHEMA ?? "public";
+    const pgSchema = process.env.PG_SCHEMA ?? "bf_v10";
     if (pgSchema !== "public") {
       console.log(`[setup] Creating schema "${pgSchema}" if not exists...`);
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${pgSchema}"`);

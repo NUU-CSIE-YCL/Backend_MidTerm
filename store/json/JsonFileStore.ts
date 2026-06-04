@@ -23,38 +23,10 @@ interface JsonFileStoreOptions {
 }
 
 const defaultMenu: MenuItem[] = [
-  {
-    id: 1,
-    name: "火腿蛋吐司",
-    price: 40,
-    category: "餐點",
-    description: "現煎雞蛋搭配火腿與生菜，使用微烤白吐司，口感清爽不油膩。",
-    image_url: "/imgs/menu/ham-egg-toast.webp",
-  },
-  {
-    id: 2,
-    name: "起司豬排堡",
-    price: 65,
-    category: "餐點",
-    description: "厚切豬排搭配起司與生菜，外酥內嫩，適合喜歡有咬勁的你。",
-    image_url: "/imgs/menu/cheese-pork-burger.webp",
-  },
-  {
-    id: 3,
-    name: "鮪魚蛋吐司",
-    price: 45,
-    category: "餐點",
-    description: "自調鮪魚沙拉配上煎蛋與生菜，口味濃郁但不會太鹹。",
-    image_url: "/imgs/menu/tuna-egg-toast.webp",
-  },
-  {
-    id: 4,
-    name: "培根蛋餅",
-    price: 45,
-    category: "餐點",
-    description: "煎到微酥的蛋餅皮包裹煙燻培根與雞蛋，是經典台式早餐選擇。",
-    image_url: "/imgs/menu/bacon-egg-roll.webp",
-  },
+  createInitialMenuItem("001", "火腿蛋吐司", 40, "餐點", "現煎雞蛋搭配火腿與生菜，使用微烤白吐司，口感清爽不油膩。", "/imgs/menu/ham-egg-toast.webp"),
+  createInitialMenuItem("002", "起司豬排堡", 65, "餐點", "厚切豬排搭配起司與生菜，外酥內嫩，適合喜歡有咬勁的你。", "/imgs/menu/cheese-pork-burger.webp"),
+  createInitialMenuItem("003", "鮪魚蛋吐司", 45, "餐點", "自調鮪魚沙拉配上煎蛋與生菜，口味濃郁但不會太鹹。", "/imgs/menu/tuna-egg-toast.webp"),
+  createInitialMenuItem("004", "培根蛋餅", 45, "餐點", "煎到微酥的蛋餅皮包裹煙燻培根與雞蛋，是經典台式早餐選擇。", "/imgs/menu/bacon-egg-roll.webp"),
 ];
 
 function cloneDefaultMenu(): MenuItem[] {
@@ -67,14 +39,73 @@ function calculateOrderTotal(items: OrderItem[]): number {
   }, 0);
 }
 
-function normalizeMenuItem(item: Partial<MenuItem>): MenuItem {
+function createInitialMenuItem(
+  logicalId: string,
+  name: string,
+  price: number,
+  category: string,
+  description: string,
+  image_url: string,
+): MenuItem {
   return {
-    id: item.id ?? 0,
+    id: `${logicalId}-01`,
+    entityId: `json-${logicalId}`,
+    logicalId,
+    version: 1,
+    name,
+    price,
+    category,
+    description,
+    image_url,
+    isCurrentVersion: true,
+    changeReason: "Initial seed",
+    createdAt: new Date(0).toISOString(),
+    createdBy: "system",
+  };
+}
+
+function normalizeLogicalId(rawId: unknown, fallback = 1): string {
+  if (typeof rawId === "number" && Number.isInteger(rawId) && rawId > 0) {
+    return String(rawId).padStart(3, "0");
+  }
+
+  if (typeof rawId === "string" && rawId.trim() !== "") {
+    const trimmed = rawId.trim();
+    if (/^\d+$/.test(trimmed)) {
+      return trimmed.padStart(3, "0");
+    }
+    return trimmed.includes("-") ? trimmed.split("-")[0]! : trimmed;
+  }
+
+  return String(fallback).padStart(3, "0");
+}
+
+function normalizeMenuItem(
+  item: Partial<MenuItem> & { id?: string | number },
+  fallback = 1,
+): MenuItem {
+  const logicalId = item.logicalId ?? normalizeLogicalId(item.id, fallback);
+  const version = item.version ?? 1;
+  const id =
+    typeof item.id === "string" && item.id.includes("-")
+      ? item.id
+      : `${logicalId}-${String(version).padStart(2, "0")}`;
+
+  return {
+    id,
+    entityId: item.entityId ?? `json-${logicalId}`,
+    logicalId,
+    version,
     name: item.name ?? "",
     price: item.price ?? 0,
     category: item.category ?? "",
     description: item.description ?? "",
     image_url: item.image_url ?? "",
+    isCurrentVersion: item.isCurrentVersion ?? true,
+    supersedes: item.supersedes,
+    changeReason: item.changeReason,
+    createdAt: item.createdAt ?? new Date().toISOString(),
+    createdBy: item.createdBy ?? "system",
   };
 }
 
@@ -163,7 +194,9 @@ export class JsonFileStore implements Store {
 
       this.applyStore({
         users: normalizedUsers,
-        menu: parsed.menu.map((item) => normalizeMenuItem(item)),
+        menu: parsed.menu.map((item, index) =>
+          normalizeMenuItem(item, index + 1),
+        ),
         orders: parsed.orders.map((order) => ({
           ...order,
           userId: normalizeUserId(order.userId ?? fallbackUserId),
@@ -188,23 +221,34 @@ export class JsonFileStore implements Store {
   }
 
   getMenu(): ReadonlyArray<MenuItem> {
-    return this.menu;
+    return this.menu.filter((item) => item.isCurrentVersion);
   }
 
   async createMenuItem(input: {
+    logical_id?: string;
     name: string;
     price: number;
     category: string;
     description: string;
     image_url: string;
+    change_reason?: string;
   }): Promise<MenuItem> {
+    const logicalId =
+      input.logical_id ?? String(++this.menuIdCounter).padStart(3, "0");
     const newMenuItem: MenuItem = {
-      id: ++this.menuIdCounter,
+      id: `${logicalId}-01`,
+      entityId: crypto.randomUUID(),
+      logicalId,
+      version: 1,
       name: input.name,
       price: input.price,
       category: input.category,
       description: input.description,
       image_url: input.image_url,
+      isCurrentVersion: true,
+      changeReason: input.change_reason ?? "Initial creation",
+      createdAt: new Date().toISOString(),
+      createdBy: "system",
     };
 
     this.menu.push(newMenuItem);
@@ -214,41 +258,58 @@ export class JsonFileStore implements Store {
   }
 
   async updateMenuItem(
-    menuId: number,
+    menuId: string,
     patch: {
       name?: string;
       price?: number;
       category?: string;
       description?: string;
       image_url?: string;
+      change_reason?: string;
     },
   ): Promise<MenuItem | null> {
-    const menuItem = this.menu.find((item) => item.id === menuId);
+    const current = this.findCurrentMenuItem(menuId);
+    if (!current) {
+      return null;
+    }
+
+    current.isCurrentVersion = false;
+
+    const nextVersion = current.version + 1;
+    const nextMenuItem: MenuItem = {
+      ...current,
+      id: `${current.logicalId}-${String(nextVersion).padStart(2, "0")}`,
+      version: nextVersion,
+      name: patch.name ?? current.name,
+      price: patch.price ?? current.price,
+      category: patch.category ?? current.category,
+      description: patch.description ?? current.description,
+      image_url: patch.image_url ?? current.image_url,
+      isCurrentVersion: true,
+      supersedes: current.id,
+      changeReason: patch.change_reason ?? "Menu item updated",
+      createdAt: new Date().toISOString(),
+      createdBy: "system",
+    };
+
+    this.menu.push(nextMenuItem);
+
+    await this.persist();
+
+    return nextMenuItem;
+  }
+
+  async deleteMenuItem(menuId: string): Promise<MenuItem | null> {
+    const menuItem = this.findCurrentMenuItem(menuId);
     if (!menuItem) {
       return null;
     }
 
-    menuItem.name = patch.name ?? menuItem.name;
-    menuItem.price = patch.price ?? menuItem.price;
-    menuItem.category = patch.category ?? menuItem.category;
-    menuItem.description = patch.description ?? menuItem.description;
-    menuItem.image_url = patch.image_url ?? menuItem.image_url;
-
+    menuItem.isCurrentVersion = false;
+    menuItem.changeReason = menuItem.changeReason ?? "Retired from current menu";
     await this.persist();
 
     return menuItem;
-  }
-
-  async deleteMenuItem(menuId: number): Promise<MenuItem | null> {
-    const targetIndex = this.menu.findIndex((item) => item.id === menuId);
-    if (targetIndex === -1) {
-      return null;
-    }
-
-    const [removedMenuItem] = this.menu.splice(targetIndex, 1);
-    await this.persist();
-
-    return removedMenuItem ?? null;
   }
 
   getOrders(): ReadonlyArray<Order> {
@@ -307,7 +368,7 @@ export class JsonFileStore implements Store {
     orderId: number,
     input: {
       userId: string;
-      itemId: number;
+      itemId: string;
       qty: number;
     },
   ): Promise<
@@ -317,6 +378,7 @@ export class JsonFileStore implements Store {
         code:
           | "ORDER_NOT_FOUND"
           | "MENU_ITEM_NOT_FOUND"
+          | "MENU_ITEM_NOT_CURRENT"
           | "ORDER_NOT_OWNED"
           | "ORDER_NOT_EDITABLE";
       }
@@ -334,24 +396,35 @@ export class JsonFileStore implements Store {
       return { ok: false, code: "ORDER_NOT_EDITABLE" };
     }
 
-    const menuItem = this.menu.find((item) => item.id === input.itemId);
-    if (!menuItem) {
-      return { ok: false, code: "MENU_ITEM_NOT_FOUND" };
-    }
-
     const existingItemIndex = order.items.findIndex(
       (orderItem) => orderItem.item.id === input.itemId,
     );
 
+    if (input.qty === 0) {
+      if (existingItemIndex !== -1) {
+        order.items.splice(existingItemIndex, 1);
+      }
+      order.total = calculateOrderTotal(order.items);
+      await this.persist();
+
+      return { ok: true, order };
+    }
+
+    const menuItem = this.menu.find((item) => item.id === input.itemId);
+    if (!menuItem) {
+      return { ok: false, code: "MENU_ITEM_NOT_FOUND" };
+    }
+    if (!menuItem.isCurrentVersion) {
+      return { ok: false, code: "MENU_ITEM_NOT_CURRENT" };
+    }
+
     if (existingItemIndex !== -1) {
       const existingOrderItem = order.items[existingItemIndex];
 
-      if (input.qty === 0) {
-        order.items.splice(existingItemIndex, 1);
-      } else if (existingOrderItem) {
+      if (existingOrderItem) {
         existingOrderItem.qty = input.qty;
       }
-    } else if (input.qty > 0) {
+    } else {
       order.items.push({ item: menuItem, qty: input.qty });
     }
 
@@ -372,7 +445,8 @@ export class JsonFileStore implements Store {
           | "ORDER_NOT_FOUND"
           | "ORDER_NOT_OWNED"
           | "ORDER_NOT_EDITABLE"
-          | "EMPTY_ORDER";
+          | "EMPTY_ORDER"
+          | "MENU_ITEM_NOT_CURRENT";
       }
   > {
     const order = this.orders.find((targetOrder) => targetOrder.id === orderId);
@@ -390,6 +464,14 @@ export class JsonFileStore implements Store {
 
     if (order.items.length === 0) {
       return { ok: false, code: "EMPTY_ORDER" };
+    }
+
+    const hasOutdatedItem = order.items.some((orderItem) => {
+      const latest = this.menu.find((item) => item.id === orderItem.item.id);
+      return !latest?.isCurrentVersion;
+    });
+    if (hasOutdatedItem) {
+      return { ok: false, code: "MENU_ITEM_NOT_CURRENT" };
     }
 
     order.status = "submitted";
@@ -420,10 +502,10 @@ export class JsonFileStore implements Store {
       return Number.isFinite(asNumber) ? Math.max(max, asNumber) : max;
     }, 0);
 
-    const maxMenuId = this.menu.reduce(
-      (max, item) => Math.max(max, item.id),
-      0,
-    );
+    const maxMenuId = this.menu.reduce((max, item) => {
+      const asNumber = Number.parseInt(item.logicalId, 10);
+      return Number.isFinite(asNumber) ? Math.max(max, asNumber) : max;
+    }, 0);
     const maxOrderId = this.orders.reduce(
       (max, order) => Math.max(max, order.id),
       0,
@@ -460,5 +542,20 @@ export class JsonFileStore implements Store {
     });
 
     await this.persistQueue;
+  }
+
+  private findCurrentMenuItem(idOrLogicalId: string): MenuItem | undefined {
+    const byLogicalId = this.menu.find(
+      (item) => item.logicalId === idOrLogicalId && item.isCurrentVersion,
+    );
+    if (byLogicalId) return byLogicalId;
+
+    const byVersionId = this.menu.find((item) => item.id === idOrLogicalId);
+    if (!byVersionId) return undefined;
+
+    return this.menu.find(
+      (item) =>
+        item.logicalId === byVersionId.logicalId && item.isCurrentVersion,
+    );
   }
 }

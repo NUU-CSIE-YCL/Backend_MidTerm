@@ -11,7 +11,7 @@ if (!migrationUrl) {
 
 export default defineConfig({
   schema: ["./db/schema.ts", "./db/auth-schema.ts"],
-  out: "./drizzle",
+  out: "./drizzle-v10",
   dialect: "postgresql",
   dbCredentials: {
     url: migrationUrl,

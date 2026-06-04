@@ -3,6 +3,7 @@ import type { MenuItem, Order } from "../shared/contracts.ts";
 export type UpdateOrderItemErrorCode =
   | "ORDER_NOT_FOUND"
   | "MENU_ITEM_NOT_FOUND"
+  | "MENU_ITEM_NOT_CURRENT"
   | "ORDER_NOT_OWNED"
   | "ORDER_NOT_EDITABLE";
 
@@ -10,30 +11,34 @@ export type SubmitOrderErrorCode =
   | "ORDER_NOT_FOUND"
   | "ORDER_NOT_OWNED"
   | "ORDER_NOT_EDITABLE"
-  | "EMPTY_ORDER";
+  | "EMPTY_ORDER"
+  | "MENU_ITEM_NOT_CURRENT";
 
 export interface Store {
   init(): Promise<void>;
 
   getMenu(): ReadonlyArray<MenuItem>;
   createMenuItem(input: {
+    logical_id?: string;
     name: string;
     price: number;
     category: string;
     description: string;
     image_url: string;
+    change_reason?: string;
   }): Promise<MenuItem>;
   updateMenuItem(
-    menuId: number,
+    menuId: string,
     patch: {
       name?: string;
       price?: number;
       category?: string;
       description?: string;
       image_url?: string;
+      change_reason?: string;
     },
   ): Promise<MenuItem | null>;
-  deleteMenuItem(menuId: number): Promise<MenuItem | null>;
+  deleteMenuItem(menuId: string): Promise<MenuItem | null>;
 
   getOrders(): ReadonlyArray<Order>;
   getCurrentOrderByUserId(userId: string): Order | undefined;
@@ -44,7 +49,7 @@ export interface Store {
     orderId: number,
     input: {
       userId: string;
-      itemId: number;
+      itemId: string;
       qty: number;
     },
   ): Promise<

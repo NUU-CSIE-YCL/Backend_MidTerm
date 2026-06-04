@@ -24,10 +24,10 @@ export default function App() {
   const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [cartQtyByItemId, setCartQtyByItemId] = useState<
-    Record<number, number>
+    Record<string, number>
   >({});
   const [cartTotal, setCartTotal] = useState(0);
-  const [activeItemId, setActiveItemId] = useState<number | null>(null);
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isClearingCart, setIsClearingCart] = useState(false);
@@ -39,7 +39,7 @@ export default function App() {
         acc[orderItem.item.id] = orderItem.qty;
         return acc;
       },
-      {} as Record<number, number>,
+      {} as Record<string, number>,
     );
 
     setCartQtyByItemId(nextQtyByItemId);
@@ -195,7 +195,7 @@ export default function App() {
 
     return Object.entries(cartQtyByItemId)
       .map(([itemIdText, qty]) => {
-        const itemId = Number(itemIdText);
+        const itemId = itemIdText;
         const item = itemById.get(itemId);
         if (!item || qty <= 0) {
           return null;
@@ -333,6 +333,10 @@ export default function App() {
         );
 
         if (!response.ok) {
+          if (response.status === 409) {
+            throw new Error("MENU_ITEM_NOT_CURRENT");
+          }
+
           throw new Error(`Update order failed: HTTP ${response.status}`);
         }
 
@@ -384,6 +388,14 @@ export default function App() {
         cartError instanceof Error &&
         cartError.message.startsWith("Auth expired:")
       ) {
+        return;
+      }
+
+      if (
+        cartError instanceof Error &&
+        cartError.message === "MENU_ITEM_NOT_CURRENT"
+      ) {
+        setActionError("菜單品項已更新，請重新整理頁面後再加入購物車。");
         return;
       }
 
@@ -464,6 +476,14 @@ export default function App() {
       );
 
       if (!response.ok) {
+        if (response.status === 409) {
+          setActionError(
+            "購物車中有品項已更新，請重新整理頁面後重新加入購物車。",
+          );
+          await loadCurrentOrder();
+          return;
+        }
+
         throw new Error(`Submit order failed: HTTP ${response.status}`);
       }
 
