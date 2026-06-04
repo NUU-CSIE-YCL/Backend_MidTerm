@@ -1,25 +1,19 @@
 import { boolean, pgSchema, text, timestamp } from "drizzle-orm/pg-core";
+import { APP_SCHEMA_NAME } from "./schema-name.ts";
 
 // ─── Auth Schema 設計原則 ─────────────────────────────────────────────────────
 // 1. 這是 Better Auth 的 DB 層定義，屬於「資料落地」層，不是 API contract。
 // 2. 欄位結構遵循 Better Auth 1.x 規格（https://better-auth.com/docs/concepts/database）。
 // 3. 與業務表（menu_items / orders / order_items）並存於同一 db/schema，
 //    但放在獨立的 auth-schema.ts，保持職責清晰、方便閱讀對照。
-// 4. pgSchema 從 PG_SCHEMA 環境變數取值，與業務 schema 一致（共用 bf_v10）。
-//    ⚠️ 注意：不能使用 "public" 作為 schema 名稱（Drizzle 限制）
+// 4. pgSchema 與業務 schema 一致，V10.1 固定共用 bf_v10。
 //
 // 對照 shared/contracts.ts：
 //   SessionUser { id, email, name }  ← 只取這三欄對外暴露（auth/better-auth.ts 負責轉換）
 //   password、emailVerified、image 等欄位屬於 DB 層，不進入 API contract。
 // ─────────────────────────────────────────────────────────────────────────────
 
-const schemaName = process.env.PG_SCHEMA || "bf_v10";
-if (schemaName === "public") {
-  throw new Error(
-    'PG_SCHEMA cannot be "public". Use a custom schema name or leave it unset to use the default "bf_v10".',
-  );
-}
-const appSchema = pgSchema(schemaName);
+const appSchema = pgSchema(APP_SCHEMA_NAME);
 
 // ─── user ─────────────────────────────────────────────────────────────────────
 // Better Auth 主表，存放使用者基本資料。

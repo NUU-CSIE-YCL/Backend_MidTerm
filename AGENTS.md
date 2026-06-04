@@ -120,6 +120,41 @@ bun run db:migrate
   - 不可出現危險的 `DROP TABLE ... CASCADE`
   - `order_items` 應使用 `menu_item_id` text FK 指向 `menu_items.id`
 
+## Render 驗證紀錄
+
+### 第一次 Render 部署驗證
+
+使用者第一次 force push 後，Render build 成功，但 runtime 啟動失敗。
+
+Render build 結果：
+
+- GitHub branch：`main`
+- commit：`77c2381e9e5b978a51d87b4ba28d56e0ef0584e5`
+- build command：`bun install && bun run build`
+- frontend build 成功
+- backend build 成功
+- deploy 後執行：`bun run start`，即 `bun dist/backend.js`
+
+runtime 失敗重點：
+
+```text
+Failed query:
+select ... "entity_id" ... from "bf_v9"."menu_items"
+
+error: column "entity_id" does not exist
+code: 42703
+```
+
+判斷：
+
+- 這不是 Bun build 或 frontend build 問題；build 已成功。
+- 線上 runtime 查詢的是 `"bf_v9"."menu_items"`，代表 Render 環境中的 `PG_SCHEMA` 仍是 `bf_v9`，或至少部署時 app 實際吃到的是 `bf_v9`。
+- 目前 V10.1 程式碼已改成期待 `entity_id`、`logical_id`、`version`、`is_current_version` 等 V10 欄位；舊 `bf_v9.menu_items` 沒有 `entity_id`，所以啟動查菜單時直接爆 `42703 column "entity_id" does not exist`。
+- 下一步優先不是改前端，也不是重跑本地測試，而是修正 Render/Neon 線上 schema 流程：
+  - Render env 必須使用 `PG_SCHEMA=bf_v10`
+  - Neon 必須已套用 V10 migration，建立 `bf_v10` schema 與 V10 tables
+  - 若 Render 每次部署要自動 migrate，build/pre-deploy 流程需要包含 `bun run db:migrate`，且 migration URL/schema 要指向 V10
+
 ## 目前 git/worktree 提醒
 
 截至撰寫本檔時，`git status --short` 顯示這些主要修改/新增：

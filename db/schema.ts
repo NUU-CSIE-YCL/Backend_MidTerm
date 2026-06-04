@@ -9,18 +9,11 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth-schema.ts";
+import { APP_SCHEMA_NAME } from "./schema-name.ts";
 
 // PostgreSQL namespace 隔離
-// 透過 PG_SCHEMA 環境變數切換，預設 "bf_v10"
-// V10 使用 bf_v10（菜單版本化 + Better Auth 整合版本）
-// 注意：不能使用 "public" 作為 schema 名稱（Drizzle 限制）
-const schemaName = process.env.PG_SCHEMA || "bf_v10";
-if (schemaName === "public") {
-  throw new Error(
-    'PG_SCHEMA cannot be "public". Use a custom schema name or leave it unset to use the default "bf_v10".',
-  );
-}
-const appSchema = pgSchema(schemaName);
+// V10.1 的 migration 固定建立 bf_v10，因此 runtime 也必須固定指向 bf_v10。
+const appSchema = pgSchema(APP_SCHEMA_NAME);
 
 // 對照 shared/contracts.ts：
 //   MenuItem { id, entityId, logicalId, version, name, price, category, description, image_url }

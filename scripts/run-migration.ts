@@ -11,6 +11,7 @@ import { neonConfig, Pool } from "@neondatabase/serverless";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import ws from "ws";
+import { APP_SCHEMA_NAME } from "../db/schema-name.ts";
 
 neonConfig.webSocketConstructor = ws;
 
@@ -60,11 +61,10 @@ async function main() {
     `);
 
     // 建立應用 schema（若不存在）
-    const pgSchema = process.env.PG_SCHEMA ?? "bf_v10";
-    if (pgSchema !== "public") {
-      console.log(`[setup] Creating schema "${pgSchema}" if not exists...`);
-      await client.query(`CREATE SCHEMA IF NOT EXISTS "${pgSchema}"`);
-    }
+    console.log(
+      `[setup] Creating schema "${APP_SCHEMA_NAME}" if not exists...`,
+    );
+    await client.query(`CREATE SCHEMA IF NOT EXISTS "${APP_SCHEMA_NAME}"`);
 
     const journalText = await readFile(JOURNAL_PATH, "utf-8");
     const journal = JSON.parse(journalText) as Journal;
