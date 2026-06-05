@@ -65,6 +65,11 @@ export const deleteMenuItemParamsSchema = z.object({
   id: z.string().min(1),
 });
 
+/** GET /api/menu/:id/history */
+export const getMenuHistoryParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
 /** GET /api/orders/:id */
 export const getOrderByIdParamsSchema = z.object({
   id: z.string().regex(/^[0-9]+$/),
@@ -93,6 +98,10 @@ export const menuListResponseSchema = z.object({
 
 export const menuItemResponseSchema = z.object({
   data: menuItemSchema,
+});
+
+export const menuHistoryResponseSchema = z.object({
+  data: z.array(menuItemSchema),
 });
 
 export const orderListResponseSchema = z.object({

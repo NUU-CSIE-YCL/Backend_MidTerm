@@ -116,6 +116,10 @@ export class PgStore implements Store {
     return removedItem;
   }
 
+  async getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>> {
+    return await menuRepository.getMenuHistory(menuId);
+  }
+
   // ── Orders ──────────────────────────────────────────────────
 
   getOrders(): ReadonlyArray<Order> {

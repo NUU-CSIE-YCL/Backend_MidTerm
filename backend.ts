@@ -7,8 +7,10 @@ import {
   apiErrorResponseSchema,
   createMenuItemBodySchema,
   deleteMenuItemParamsSchema,
+  getMenuHistoryParamsSchema,
   getOrderByIdParamsSchema,
   healthResponseSchema,
+  menuHistoryResponseSchema,
   menuItemResponseSchema,
   menuListResponseSchema,
   nullableOrderResponseEnvelopeSchema,
@@ -150,7 +152,8 @@ app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
 
 app.post(
   "/api/menu",
-  async ({ body, set }) => {
+  async ({ body, request, set }) => {
+    await requireUser(request);
     const newMenuItem = await store.createMenuItem(
       body as Parameters<typeof store.createMenuItem>[0],
     );
@@ -166,13 +169,42 @@ app.post(
     },
     response: {
       201: menuItemResponseSchema,
+      401: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/menu/:id/history",
+  async ({ params, set }) => {
+    const history = await store.getMenuHistory(params.id);
+
+    if (history.length === 0) {
+      set.status = 404;
+      return { error: "Menu item not found" };
+    }
+
+    return { data: [...history] };
+  },
+  {
+    params: getMenuHistoryParamsSchema,
+    detail: {
+      tags: ["menu"],
+      summary: "List menu item version history",
+      description:
+        "Return all versions of a menu item, newest first, by logical id or version id.",
+    },
+    response: {
+      200: menuHistoryResponseSchema,
+      404: apiErrorResponseSchema,
     },
   },
 );
 
 app.patch(
   "/api/menu/:id",
-  async ({ params, body, set }) => {
+  async ({ params, body, request, set }) => {
+    await requireUser(request);
     const menuItem = await store.updateMenuItem(params.id, body);
 
     if (!menuItem) {
@@ -192,6 +224,7 @@ app.patch(
     },
     response: {
       200: menuItemResponseSchema,
+      401: apiErrorResponseSchema,
       404: apiErrorResponseSchema,
     },
   },
@@ -199,7 +232,8 @@ app.patch(
 
 app.delete(
   "/api/menu/:id",
-  async ({ params, set }) => {
+  async ({ params, request, set }) => {
+    await requireUser(request);
     const removedMenuItem = await store.deleteMenuItem(params.id);
 
     if (!removedMenuItem) {
@@ -218,6 +252,7 @@ app.delete(
     },
     response: {
       200: menuItemResponseSchema,
+      401: apiErrorResponseSchema,
       404: apiErrorResponseSchema,
     },
   },

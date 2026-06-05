@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 import type { MenuItem } from "../../shared/contracts.ts";
 import { db } from "../client.ts";
 import { menuItemsTable } from "../schema.ts";
@@ -74,6 +74,29 @@ export class MenuRepository {
       .limit(1);
 
     return row ? toMenuItem(row) : null;
+  }
+
+  async getMenuHistory(idOrLogicalId: string): Promise<MenuItem[]> {
+    const [lookup] = await db
+      .select({ logicalId: menuItemsTable.logicalId })
+      .from(menuItemsTable)
+      .where(
+        or(
+          eq(menuItemsTable.logicalId, idOrLogicalId),
+          eq(menuItemsTable.id, idOrLogicalId),
+        ),
+      )
+      .limit(1);
+
+    if (!lookup) return [];
+
+    const rows = await db
+      .select()
+      .from(menuItemsTable)
+      .where(eq(menuItemsTable.logicalId, lookup.logicalId))
+      .orderBy(desc(menuItemsTable.version));
+
+    return rows.map(toMenuItem);
   }
 
   async createMenuItem(

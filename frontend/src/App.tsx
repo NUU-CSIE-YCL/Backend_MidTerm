@@ -1,4 +1,10 @@
-import { useEffect, useState, useMemo } from "react";
+import {
+  Fragment,
+  useEffect,
+  useState,
+  useMemo,
+  type FormEvent,
+} from "react";
 import "./App.css";
 import type {
   ApiDataResponse,
@@ -11,6 +17,54 @@ const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 function buildApiUrl(path: string) {
   return `${apiBaseUrl}${path}`;
+}
+
+interface MenuFormState {
+  logical_id: string;
+  name: string;
+  price: string;
+  category: string;
+  description: string;
+  image_url: string;
+  change_reason: string;
+}
+
+function createEmptyMenuForm(): MenuFormState {
+  return {
+    logical_id: "",
+    name: "",
+    price: "",
+    category: "",
+    description: "",
+    image_url: "",
+    change_reason: "",
+  };
+}
+
+function createMenuFormFromItem(item: MenuItem): MenuFormState {
+  return {
+    logical_id: item.logicalId,
+    name: item.name,
+    price: String(item.price),
+    category: item.category,
+    description: item.description,
+    image_url: item.image_url,
+    change_reason: "",
+  };
+}
+
+function formatVersionTime(value?: string): string {
+  if (!value) return "未記錄";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleString("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function App() {
@@ -32,6 +86,21 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isClearingCart, setIsClearingCart] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [menuForm, setMenuForm] = useState<MenuFormState>(() =>
+    createEmptyMenuForm(),
+  );
+  const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
+  const [isSavingMenu, setIsSavingMenu] = useState(false);
+  const [retiringMenuId, setRetiringMenuId] = useState<string | null>(null);
+  const [menuAdminMessage, setMenuAdminMessage] = useState("");
+  const [menuAdminError, setMenuAdminError] = useState("");
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(
+    null,
+  );
+  const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
+  const [historyByLogicalId, setHistoryByLogicalId] = useState<
+    Record<string, MenuItem[]>
+  >({});
 
   function syncCartFromOrder(order: Order) {
     const nextQtyByItemId = order.items.reduce(
@@ -51,6 +120,22 @@ export default function App() {
     setCartQtyByItemId({});
     setCartTotal(0);
     setIsCartOpen(false);
+  }
+
+  async function fetchMenuItems(): Promise<MenuItem[]> {
+    const response = await fetch(buildApiUrl("/api/menu"));
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as ApiDataResponse<MenuItem[]>;
+    return Array.isArray(payload?.data) ? payload.data : [];
+  }
+
+  async function refreshMenu(): Promise<MenuItem[]> {
+    const fetchedItems = await fetchMenuItems();
+    setItems(fetchedItems);
+    return fetchedItems;
   }
 
   async function loadCurrentOrder(): Promise<Order | null> {
@@ -119,15 +204,9 @@ export default function App() {
     }
     void restoreSession();
 
-    async function loadMenu() {
+    async function loadInitialMenu() {
       try {
-        const response = await fetch(buildApiUrl("/api/menu"));
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const payload = (await response.json()) as ApiDataResponse<MenuItem[]>;
-        const fetchedItems = Array.isArray(payload?.data) ? payload.data : [];
+        const fetchedItems = await fetchMenuItems();
 
         if (mounted) {
           setItems(fetchedItems);
@@ -144,7 +223,7 @@ export default function App() {
       }
     }
 
-    void loadMenu();
+    void loadInitialMenu();
 
     return () => {
       mounted = false;
@@ -304,6 +383,203 @@ export default function App() {
     setAuthError("");
     setActionError("");
     resetCartState();
+  }
+
+  function updateMenuFormField(field: keyof MenuFormState, value: string): void {
+    setMenuForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function resetMenuEditor(): void {
+    setEditingMenuId(null);
+    setMenuForm(createEmptyMenuForm());
+  }
+
+  function startEditMenuItem(item: MenuItem): void {
+    setEditingMenuId(item.id);
+    setMenuForm(createMenuFormFromItem(item));
+    setMenuAdminError("");
+    setMenuAdminMessage("");
+  }
+
+  async function loadMenuHistory(
+    menuId: string,
+    force = false,
+  ): Promise<void> {
+    const currentItem = items.find(
+      (item) => item.logicalId === menuId || item.id === menuId,
+    );
+    const logicalId = currentItem?.logicalId ?? menuId.split("-")[0] ?? menuId;
+
+    if (!force && historyByLogicalId[logicalId]) {
+      setExpandedHistoryId(logicalId);
+      return;
+    }
+
+    setHistoryLoadingId(logicalId);
+    setMenuAdminError("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/menu/${encodeURIComponent(menuId)}/history`),
+      );
+      if (!response.ok) {
+        throw new Error(`Load menu history failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<MenuItem[]>;
+      setHistoryByLogicalId((current) => ({
+        ...current,
+        [logicalId]: Array.isArray(payload?.data) ? payload.data : [],
+      }));
+      setExpandedHistoryId(logicalId);
+    } catch (historyError) {
+      setMenuAdminError("讀取版本歷史失敗，請稍後再試。");
+      console.error(historyError);
+    } finally {
+      setHistoryLoadingId(null);
+    }
+  }
+
+  function toggleMenuHistory(item: MenuItem): void {
+    if (expandedHistoryId === item.logicalId) {
+      setExpandedHistoryId(null);
+      return;
+    }
+
+    void loadMenuHistory(item.logicalId);
+  }
+
+  async function handleSaveMenuItem(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+
+    if (!user) {
+      setMenuAdminError("請先登入後再管理菜單。");
+      return;
+    }
+
+    const price = Number(menuForm.price);
+    if (!Number.isInteger(price) || price < 0) {
+      setMenuAdminError("價格必須是 0 以上的整數。");
+      return;
+    }
+
+    const isEditing = editingMenuId !== null;
+    const payload: Record<string, string | number> = {
+      name: menuForm.name.trim(),
+      price,
+      category: menuForm.category.trim(),
+      description: menuForm.description.trim(),
+      image_url: menuForm.image_url.trim(),
+      change_reason:
+        menuForm.change_reason.trim() ||
+        (isEditing ? "網站管理介面更新" : "網站管理介面新增"),
+    };
+
+    if (!isEditing && menuForm.logical_id.trim()) {
+      payload.logical_id = menuForm.logical_id.trim();
+    }
+
+    setIsSavingMenu(true);
+    setMenuAdminError("");
+    setMenuAdminMessage("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(isEditing ? `/api/menu/${editingMenuId}` : "/api/menu"),
+        {
+          method: isEditing ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setUser(null);
+          throw new Error("請重新登入後再管理菜單。");
+        }
+
+        throw new Error(`Save menu item failed: HTTP ${response.status}`);
+      }
+
+      const result = (await response.json()) as ApiDataResponse<MenuItem>;
+      const savedItem = result.data;
+
+      await refreshMenu();
+      setHistoryByLogicalId({});
+      resetMenuEditor();
+      setMenuAdminMessage(
+        isEditing
+          ? `${savedItem.name} 已建立新版 ${savedItem.id}`
+          : `${savedItem.name} 已新增為 ${savedItem.id}`,
+      );
+
+      if (isEditing) {
+        await loadMenuHistory(savedItem.logicalId, true);
+      }
+    } catch (saveError) {
+      setMenuAdminError(
+        saveError instanceof Error
+          ? saveError.message
+          : "儲存菜單失敗，請稍後再試。",
+      );
+      console.error(saveError);
+    } finally {
+      setIsSavingMenu(false);
+    }
+  }
+
+  async function retireMenuItem(item: MenuItem): Promise<void> {
+    if (!user) {
+      setMenuAdminError("請先登入後再管理菜單。");
+      return;
+    }
+
+    const confirmed = window.confirm(`確定要下架「${item.name}」嗎？`);
+    if (!confirmed) return;
+
+    setRetiringMenuId(item.id);
+    setMenuAdminError("");
+    setMenuAdminMessage("");
+
+    try {
+      const response = await fetch(buildApiUrl(`/api/menu/${item.id}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setUser(null);
+          throw new Error("請重新登入後再管理菜單。");
+        }
+
+        throw new Error(`Retire menu item failed: HTTP ${response.status}`);
+      }
+
+      await refreshMenu();
+      setHistoryByLogicalId({});
+      if (expandedHistoryId === item.logicalId) {
+        setExpandedHistoryId(null);
+      }
+      setMenuAdminMessage(`${item.name} 已從目前菜單下架`);
+
+      if (editingMenuId === item.id) {
+        resetMenuEditor();
+      }
+    } catch (retireError) {
+      setMenuAdminError(
+        retireError instanceof Error
+          ? retireError.message
+          : "下架菜單失敗，請稍後再試。",
+      );
+      console.error(retireError);
+    } finally {
+      setRetiringMenuId(null);
+    }
   }
 
   async function addToCart(item: MenuItem): Promise<void> {
@@ -589,6 +865,302 @@ export default function App() {
           </div>
         ) : null}
 
+        {user ? (
+          <section className="mb-8 rounded-lg border border-base-300 bg-base-100 shadow-sm">
+            <div className="border-b border-base-300 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-bold">菜單管理</h2>
+                  <p className="text-sm opacity-70">
+                    登入使用者可新增、建立新版或下架目前菜單。
+                  </p>
+                </div>
+                <button
+                  className="btn btn-sm btn-outline"
+                  onClick={resetMenuEditor}
+                  type="button"
+                >
+                  新增模式
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-4 p-4 lg:grid-cols-[minmax(280px,360px)_1fr]">
+              <form
+                className="space-y-3 rounded-lg border border-base-300 bg-base-200 p-4"
+                onSubmit={(event) => {
+                  void handleSaveMenuItem(event);
+                }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-semibold">
+                    {editingMenuId ? "編輯品項" : "新增品項"}
+                  </h3>
+                  {editingMenuId ? (
+                    <span className="badge badge-info">{editingMenuId}</span>
+                  ) : null}
+                </div>
+
+                {menuAdminMessage ? (
+                  <div className="alert alert-success py-2">
+                    <span>{menuAdminMessage}</span>
+                  </div>
+                ) : null}
+                {menuAdminError ? (
+                  <div className="alert alert-error py-2">
+                    <span>{menuAdminError}</span>
+                  </div>
+                ) : null}
+
+                <label className="form-control">
+                  <span className="label-text">顯示編號</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    disabled={editingMenuId !== null}
+                    onChange={(event) =>
+                      updateMenuFormField("logical_id", event.target.value)
+                    }
+                    placeholder="留空自動產生，例如 099"
+                    value={menuForm.logical_id}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">品項名稱</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    onChange={(event) =>
+                      updateMenuFormField("name", event.target.value)
+                    }
+                    required
+                    value={menuForm.name}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">價格</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    min="0"
+                    onChange={(event) =>
+                      updateMenuFormField("price", event.target.value)
+                    }
+                    required
+                    type="number"
+                    value={menuForm.price}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">分類</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    onChange={(event) =>
+                      updateMenuFormField("category", event.target.value)
+                    }
+                    required
+                    value={menuForm.category}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">圖片 URL</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    onChange={(event) =>
+                      updateMenuFormField("image_url", event.target.value)
+                    }
+                    required
+                    value={menuForm.image_url}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">描述</span>
+                  <textarea
+                    className="textarea textarea-bordered min-h-20"
+                    onChange={(event) =>
+                      updateMenuFormField("description", event.target.value)
+                    }
+                    required
+                    value={menuForm.description}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">變更原因</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    onChange={(event) =>
+                      updateMenuFormField("change_reason", event.target.value)
+                    }
+                    placeholder={
+                      editingMenuId ? "例如：原物料調價" : "例如：新增季節品項"
+                    }
+                    value={menuForm.change_reason}
+                  />
+                </label>
+
+                <div className="flex gap-2">
+                  <button
+                    className="btn btn-primary btn-sm flex-1"
+                    disabled={isSavingMenu}
+                    type="submit"
+                  >
+                    {isSavingMenu
+                      ? "儲存中..."
+                      : editingMenuId
+                        ? "建立新版"
+                        : "新增品項"}
+                  </button>
+                  {editingMenuId ? (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={resetMenuEditor}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+
+              <div className="overflow-x-auto rounded-lg border border-base-300">
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>品項</th>
+                      <th>版本</th>
+                      <th>價格</th>
+                      <th>狀態</th>
+                      <th className="text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => {
+                      const isExpanded = expandedHistoryId === item.logicalId;
+                      const versions = historyByLogicalId[item.logicalId] ?? [];
+
+                      return (
+                        <Fragment key={item.id}>
+                          <tr>
+                            <td>
+                              <div className="font-semibold">{item.name}</div>
+                              <div className="text-xs opacity-70">
+                                {item.logicalId}・{item.category}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="flex flex-wrap gap-1">
+                                <span className="badge badge-outline">
+                                  {item.id}
+                                </span>
+                                <span className="badge badge-info">
+                                  v{item.version}
+                                </span>
+                              </div>
+                            </td>
+                            <td>${item.price}</td>
+                            <td>
+                              {item.version > 1 ? (
+                                <span className="badge badge-warning">
+                                  已調整
+                                </span>
+                              ) : (
+                                <span className="badge badge-success">
+                                  現行
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  className="btn btn-xs btn-outline"
+                                  onClick={() => toggleMenuHistory(item)}
+                                  type="button"
+                                >
+                                  {historyLoadingId === item.logicalId
+                                    ? "讀取中"
+                                    : isExpanded
+                                      ? "收合"
+                                      : "歷史"}
+                                </button>
+                                <button
+                                  className="btn btn-xs"
+                                  onClick={() => startEditMenuItem(item)}
+                                  type="button"
+                                >
+                                  編輯
+                                </button>
+                                <button
+                                  className="btn btn-xs btn-error btn-outline"
+                                  disabled={retiringMenuId === item.id}
+                                  onClick={() => {
+                                    void retireMenuItem(item);
+                                  }}
+                                  type="button"
+                                >
+                                  {retiringMenuId === item.id
+                                    ? "下架中"
+                                    : "下架"}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded ? (
+                            <tr>
+                              <td colSpan={5}>
+                                {versions.length === 0 ? (
+                                  <div className="text-sm opacity-70">
+                                    尚無版本歷史資料。
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {versions.map((version) => (
+                                      <div
+                                        className="flex flex-wrap items-center justify-between gap-2 rounded bg-base-200 p-2 text-sm"
+                                        key={version.id}
+                                      >
+                                        <div>
+                                          <span className="font-semibold">
+                                            {version.id}
+                                          </span>
+                                          <span className="ml-2 opacity-70">
+                                            ${version.price}・
+                                            {formatVersionTime(
+                                              version.createdAt,
+                                            )}
+                                          </span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                          {version.isCurrentVersion ? (
+                                            <span className="badge badge-success">
+                                              current
+                                            </span>
+                                          ) : null}
+                                          {version.changeReason ? (
+                                            <span className="badge badge-outline">
+                                              {version.changeReason}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         {items.length === 0 ? (
           <div className="alert alert-info">
             <span>目前沒有菜單資料</span>
@@ -619,7 +1191,22 @@ export default function App() {
                       />
                     </figure>
                     <div className="card-body">
-                      <h3 className="card-title text-lg">{item.name}</h3>
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="card-title text-lg">{item.name}</h3>
+                        <div className="flex flex-wrap justify-end gap-1">
+                          <span className="badge badge-outline">
+                            {item.logicalId}
+                          </span>
+                          <span className="badge badge-info">
+                            v{item.version}
+                          </span>
+                          {item.version > 1 ? (
+                            <span className="badge badge-warning">
+                              已調整
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
                       <p className="text-sm opacity-80 line-clamp-2 min-h-[2.75rem]">
                         {item.description}
                       </p>

@@ -39,6 +39,7 @@ export interface Store {
     },
   ): Promise<MenuItem | null>;
   deleteMenuItem(menuId: string): Promise<MenuItem | null>;
+  getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>>;
 
   getOrders(): ReadonlyArray<Order>;
   getCurrentOrderByUserId(userId: string): Order | undefined;

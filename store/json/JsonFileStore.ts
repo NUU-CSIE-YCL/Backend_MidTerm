@@ -312,6 +312,17 @@ export class JsonFileStore implements Store {
     return menuItem;
   }
 
+  async getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>> {
+    const target = this.menu.find(
+      (item) => item.logicalId === menuId || item.id === menuId,
+    );
+    if (!target) return [];
+
+    return this.menu
+      .filter((item) => item.logicalId === target.logicalId)
+      .sort((a, b) => b.version - a.version);
+  }
+
   getOrders(): ReadonlyArray<Order> {
     return this.orders;
   }
