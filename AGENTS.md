@@ -4,11 +4,11 @@
 
 ## 目前結論
 
-- 專案目前已完成並已由使用者在 Render 線上驗證到 `V10.2`。
-- 本輪已實作 `V10.3A RBAC 基礎切片`，目前待使用者推上 Render 做線上驗證。
+- 專案目前已完成並已由使用者在 Render 線上驗證到 `V10.3A`。
+- 本輪已實作 `V10.3B 角色申請與 Admin 審核`，目前待使用者推上 Render 做線上驗證。
 - `V10.1 基礎版本化` 已完成：菜單品項版本化、訂單引用特定菜單版本、舊菜單版本不可再加入購物車或結帳。
 - `V10.2 菜單管理與版本展示` 已完成：登入後可在網站管理菜單、建立新版、下架、查版本歷史、顯示版本提示與圖片錯誤提示。
-- 下一階段若繼續做完整角色申請/審核，應視為 `V10.3B`，不要再把 V10.1/V10.2 當成待完成項目。
+- 下一階段若繼續做 admin 直接角色管理或更進階後台，應視為 `V10.3C` 或後續強化，不要再把 V10.1/V10.2/V10.3A 當成待完成項目。
 
 ## 專案脈絡
 
@@ -54,7 +54,7 @@
   - 失敗時提供「開啟原圖」連結
   - 菜單管理表單有圖片 URL 即時預覽
 
-### V10.3A 已本機實作，待 Render 驗證
+### V10.3A 已完成並驗證
 
 - `bf_v10.user` 新增 `roles text[]`，預設 `["customer"]`。
 - 新增 migration：`drizzle-v10/0001_v10_rbac_roles.sql`，已加入 `drizzle-v10/meta/_journal.json`。
@@ -67,6 +67,24 @@
 - `GET /api/orders` 已改為只有 `staff/chef/owner/admin` 可查看所有訂單。
 - 顧客自己的購物車、下單、訂單歷史流程維持不變。
 - 前端會顯示角色 badge，且只有 `owner/admin` 會看到菜單管理 UI。
+- 使用者已回報 Render 完全驗證成功。
+
+### V10.3B 已本機實作，待 Render 驗證
+
+- 新增 `role_requests` table。
+- 新增 migration：`drizzle-v10/0002_v10_role_requests.sql`，已加入 `drizzle-v10/meta/_journal.json`。
+- 新增 role request contracts 與 route schemas。
+- 一般使用者可申請 `staff` 或 `chef`。
+- 同一使用者同時間只能有一筆 `pending` 申請。
+- 已擁有的角色不能重複申請。
+- 新增 API：
+  - `POST /api/users/me/role-request`
+  - `GET /api/users/me/role-requests`
+  - `GET /api/admin/role-requests`
+  - `PATCH /api/admin/role-requests/:id`
+- admin 可查看、核准、拒絕角色申請。
+- admin 核准後會把 requested role 合併到目標使用者 roles，保留 `customer` 並去重。
+- 前端同頁新增「角色申請」卡片與 admin「角色申請審核」卡片。
 
 ## 重要檔案
 
@@ -87,6 +105,8 @@
 migration 與啟動：
 
 - `drizzle-v10/0000_v10_initial.sql`
+- `drizzle-v10/0001_v10_rbac_roles.sql`
+- `drizzle-v10/0002_v10_role_requests.sql`
 - `drizzle-v10/meta/_journal.json`
 - `scripts/run-migration.ts`
 - `scripts/start.ts`
@@ -102,6 +122,7 @@ migration 與啟動：
 
 - `tests/v10-menu-versioning.test.ts`
 - `tests/v10-rbac.test.ts`
+- `tests/v10-role-requests.test.ts`
 - `報告.md`
 - `AGENTS.md`
 
@@ -128,6 +149,7 @@ Render 線上驗證已由使用者完成：
 - 改價後會建立新版，舊版不再是 current。
 - 可查看版本歷史。
 - 圖片 URL 顯示與失敗提示已驗證成功。
+- V10.3A RBAC 基礎切片已由使用者回報 Render 完全驗證成功。
 
 V10.3A 本輪本機驗證已通過：
 
@@ -135,6 +157,15 @@ V10.3A 本輪本機驗證已通過：
 bun test
 bun run build
 bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts
+git diff --check
+```
+
+V10.3B 本輪本機驗證已通過：
+
+```bash
+bun test
+bun run build
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts
 git diff --check
 ```
 
@@ -156,11 +187,10 @@ Render env 需要維持：
 
 ## 目前尚未做
 
-這些屬於 V10.3B 或後續強化，不屬於 V10.3A：
+這些屬於 V10.3C 或後續強化，不屬於 V10.3B：
 
-- `roles`、`role_requests` 或權限申請流程。
-- admin 審核角色申請。
 - 直接分配或移除使用者角色的後台 UI。
+- owner/admin 自助申請或升級流程。
 - 菜單顯示排序 display order。
 - major/minor version。
 - A/B testing。
@@ -172,8 +202,8 @@ Render env 需要維持：
 
 1. 先讀 `AGENTS.md` 與 `報告.md`。
 2. 看 `git status --short`，確認是否只有文件變更或是否有使用者新改動。
-3. 若使用者問目前進度，回答：V10.1 與 V10.2 都已完成並經 Render 驗證；V10.3A 已本機實作，待 Render 驗證。
-4. 若使用者要求繼續開發，先判斷是否進入 V10.3B；不要回頭重做 V10.1/V10.2。
+3. 若使用者問目前進度，回答：V10.1、V10.2、V10.3A 都已完成並經 Render 驗證；V10.3B 已本機實作，待 Render 驗證。
+4. 若使用者要求繼續開發，先判斷是否進入 V10.3C；不要回頭重做 V10.1/V10.2/V10.3A。
 5. 涉及 Neon schema 或 migration 時要保守，先檢查 SQL，避免動到 legacy `bf_v8`、`bf_v9` 或舊 `drizzle/`。
 
 ## 使用者偏好的工作流

@@ -87,3 +87,29 @@ export const orderItemsTable = appSchema.table(
     ),
   }),
 );
+
+export const roleRequestsTable = appSchema.table(
+  "role_requests",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    requestedRole: text("requested_role").notNull(),
+    reason: text("reason").notNull(),
+    status: text("status").notNull().default("pending"),
+    requestedAt: timestamp("requested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    reviewedBy: text("reviewed_by").references(() => user.id),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewNote: text("review_note"),
+  },
+  (table) => ({
+    roleRequestsUserStatusIdx: index("role_requests_user_status_idx").on(
+      table.userId,
+      table.status,
+    ),
+    roleRequestsStatusIdx: index("role_requests_status_idx").on(table.status),
+  }),
+);

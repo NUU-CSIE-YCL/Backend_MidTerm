@@ -2,21 +2,28 @@ import { Elysia } from "elysia";
 import { openapi } from "@elysiajs/openapi";
 import { cors } from "@elysia/cors";
 import { existsSync } from "node:fs";
+import { and, desc, eq } from "drizzle-orm";
 import toTaipeiDateTime from "./util.ts";
 import {
   apiErrorResponseSchema,
   createMenuItemBodySchema,
+  createRoleRequestBodySchema,
   currentUserResponseSchema,
   deleteMenuItemParamsSchema,
   getMenuHistoryParamsSchema,
   getOrderByIdParamsSchema,
   healthResponseSchema,
+  listRoleRequestsQuerySchema,
   menuHistoryResponseSchema,
   menuItemResponseSchema,
   menuListResponseSchema,
   nullableOrderResponseEnvelopeSchema,
   orderListResponseSchema,
   orderResponseEnvelopeSchema,
+  reviewRoleRequestBodySchema,
+  reviewRoleRequestParamsSchema,
+  roleRequestListResponseSchema,
+  roleRequestResponseSchema,
   submitOrderParamsSchema,
   toOrderResponse,
   updateMenuItemBodySchema,
@@ -26,8 +33,11 @@ import {
 } from "./shared/route-schemas.ts";
 import { createStore } from "./store/index.ts";
 import { auth, getCurrentUser } from "./auth/better-auth.ts";
+import { db } from "./db/client.ts";
+import { user as authUsersTable } from "./db/auth-schema.ts";
+import { roleRequestsTable } from "./db/schema.ts";
 import { requireAnyRole } from "./shared/guards.ts";
-import type { Role } from "./shared/contracts.ts";
+import { roleSchema, type Role, type RoleRequest } from "./shared/contracts.ts";
 
 // 從環境變量獲取配置
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -37,6 +47,7 @@ const store = createStore({ dataFilePath: "./data/store.json" });
 const hasPublicAssets =
   existsSync("./public") && existsSync("./public/index.html");
 const menuManagerRoles = ["owner", "admin"] as const satisfies readonly Role[];
+const adminRoles = ["admin"] as const satisfies readonly Role[];
 const orderViewerRoles = [
   "staff",
   "chef",
@@ -64,6 +75,53 @@ async function requireUserWithAnyRole(
   const user = await requireUser(request);
   requireAnyRole(user, roles);
   return user;
+}
+
+function normalizeRoles(value: unknown): Role[] {
+  const source = Array.isArray(value) ? value : [];
+  const roles = source.filter((role): role is Role => {
+    return roleSchema.safeParse(role).success;
+  });
+
+  if (!roles.includes("customer")) {
+    roles.unshift("customer");
+  }
+
+  return [...new Set(roles)];
+}
+
+function toRoleRequestResponse(row: {
+  id: number;
+  userId: string;
+  requestedRole: string;
+  reason: string;
+  status: string;
+  requestedAt: Date;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  reviewNote: string | null;
+  requesterName?: string | null;
+  requesterEmail?: string | null;
+}): RoleRequest {
+  return {
+    id: row.id,
+    userId: row.userId,
+    requestedRole:
+      row.requestedRole === "chef" || row.requestedRole === "staff"
+        ? row.requestedRole
+        : "staff",
+    reason: row.reason,
+    status:
+      row.status === "approved" || row.status === "rejected"
+        ? row.status
+        : "pending",
+    requestedAt: row.requestedAt.toISOString(),
+    reviewedBy: row.reviewedBy,
+    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+    reviewNote: row.reviewNote,
+    requesterName: row.requesterName ?? null,
+    requesterEmail: row.requesterEmail ?? null,
+  };
 }
 
 const app = new Elysia();
@@ -172,6 +230,254 @@ app.get(
     response: {
       200: currentUserResponseSchema,
       401: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.post(
+  "/api/users/me/role-request",
+  async ({ body, request, set }) => {
+    const user = await requireUser(request);
+    const requestBody = body as {
+      requestedRole: "staff" | "chef";
+      reason: string;
+    };
+
+    if (user.roles.includes(requestBody.requestedRole)) {
+      set.status = 409;
+      return { error: "Role already granted" };
+    }
+
+    const [existingPendingRequest] = await db
+      .select({ id: roleRequestsTable.id })
+      .from(roleRequestsTable)
+      .where(
+        and(
+          eq(roleRequestsTable.userId, user.id),
+          eq(roleRequestsTable.status, "pending"),
+        ),
+      )
+      .limit(1);
+
+    if (existingPendingRequest) {
+      set.status = 409;
+      return { error: "You already have a pending role request" };
+    }
+
+    const [newRequest] = await db
+      .insert(roleRequestsTable)
+      .values({
+        userId: user.id,
+        requestedRole: requestBody.requestedRole,
+        reason: requestBody.reason,
+      })
+      .returning();
+
+    set.status = 201;
+    return { data: toRoleRequestResponse(newRequest!) };
+  },
+  {
+    body: createRoleRequestBodySchema,
+    detail: {
+      tags: ["auth"],
+      summary: "Request a staff or chef role",
+      description:
+        "Create a pending role request for the signed-in user. Only staff and chef can be self-requested.",
+    },
+    response: {
+      201: roleRequestResponseSchema,
+      401: apiErrorResponseSchema,
+      409: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/users/me/role-requests",
+  async ({ request }) => {
+    const user = await requireUser(request);
+
+    const requests = await db
+      .select()
+      .from(roleRequestsTable)
+      .where(eq(roleRequestsTable.userId, user.id))
+      .orderBy(desc(roleRequestsTable.requestedAt));
+
+    return {
+      data: requests.map((row) =>
+        toRoleRequestResponse({
+          ...row,
+          requesterName: user.name,
+          requesterEmail: user.email,
+        }),
+      ),
+    };
+  },
+  {
+    detail: {
+      tags: ["auth"],
+      summary: "List my role requests",
+      description: "Return role requests submitted by the signed-in user.",
+    },
+    response: {
+      200: roleRequestListResponseSchema,
+      401: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/admin/role-requests",
+  async ({ query, request }) => {
+    await requireUserWithAnyRole(request, adminRoles);
+    const status = (query.status ?? "pending") as
+      | "pending"
+      | "approved"
+      | "rejected"
+      | "all";
+
+    const selectRoleRequests = () =>
+      db
+        .select({
+          id: roleRequestsTable.id,
+          userId: roleRequestsTable.userId,
+          requestedRole: roleRequestsTable.requestedRole,
+          reason: roleRequestsTable.reason,
+          status: roleRequestsTable.status,
+          requestedAt: roleRequestsTable.requestedAt,
+          reviewedBy: roleRequestsTable.reviewedBy,
+          reviewedAt: roleRequestsTable.reviewedAt,
+          reviewNote: roleRequestsTable.reviewNote,
+          requesterName: authUsersTable.name,
+          requesterEmail: authUsersTable.email,
+        })
+        .from(roleRequestsTable)
+        .leftJoin(
+          authUsersTable,
+          eq(roleRequestsTable.userId, authUsersTable.id),
+        );
+
+    const rows =
+      status === "all"
+        ? await selectRoleRequests().orderBy(desc(roleRequestsTable.requestedAt))
+        : await selectRoleRequests()
+            .where(eq(roleRequestsTable.status, status))
+            .orderBy(desc(roleRequestsTable.requestedAt));
+
+    return { data: rows.map(toRoleRequestResponse) };
+  },
+  {
+    query: listRoleRequestsQuerySchema,
+    detail: {
+      tags: ["admin"],
+      summary: "List role requests",
+      description: "Return role requests for admin review.",
+    },
+    response: {
+      200: roleRequestListResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.patch(
+  "/api/admin/role-requests/:id",
+  async ({ params, body, request, set }) => {
+    const reviewer = await requireUserWithAnyRole(request, adminRoles);
+    const requestId = parseInt(params.id, 10);
+    const reviewBody = body as {
+      status: "approved" | "rejected";
+      reviewNote?: string;
+    };
+
+    const [existingRequest] = await db
+      .select()
+      .from(roleRequestsTable)
+      .where(eq(roleRequestsTable.id, requestId))
+      .limit(1);
+
+    if (!existingRequest) {
+      set.status = 404;
+      return { error: "Role request not found" };
+    }
+
+    if (existingRequest.status !== "pending") {
+      set.status = 409;
+      return { error: "This request has already been reviewed" };
+    }
+
+    const [updatedRequest] = await db
+      .update(roleRequestsTable)
+      .set({
+        status: reviewBody.status,
+        reviewedBy: reviewer.id,
+        reviewedAt: new Date(),
+        reviewNote: reviewBody.reviewNote?.trim() || null,
+      })
+      .where(eq(roleRequestsTable.id, requestId))
+      .returning();
+
+    if (reviewBody.status === "approved") {
+      const [targetUser] = await db
+        .select({
+          roles: authUsersTable.roles,
+        })
+        .from(authUsersTable)
+        .where(eq(authUsersTable.id, existingRequest.userId))
+        .limit(1);
+
+      if (targetUser) {
+        const nextRoles = normalizeRoles([
+          ...normalizeRoles(targetUser.roles),
+          existingRequest.requestedRole,
+        ]);
+
+        await db
+          .update(authUsersTable)
+          .set({
+            roles: nextRoles,
+            updatedAt: new Date(),
+          })
+          .where(eq(authUsersTable.id, existingRequest.userId));
+      }
+    }
+
+    const [requestWithUser] = await db
+      .select({
+        id: roleRequestsTable.id,
+        userId: roleRequestsTable.userId,
+        requestedRole: roleRequestsTable.requestedRole,
+        reason: roleRequestsTable.reason,
+        status: roleRequestsTable.status,
+        requestedAt: roleRequestsTable.requestedAt,
+        reviewedBy: roleRequestsTable.reviewedBy,
+        reviewedAt: roleRequestsTable.reviewedAt,
+        reviewNote: roleRequestsTable.reviewNote,
+        requesterName: authUsersTable.name,
+        requesterEmail: authUsersTable.email,
+      })
+      .from(roleRequestsTable)
+      .leftJoin(authUsersTable, eq(roleRequestsTable.userId, authUsersTable.id))
+      .where(eq(roleRequestsTable.id, updatedRequest!.id))
+      .limit(1);
+
+    return { data: toRoleRequestResponse(requestWithUser!) };
+  },
+  {
+    params: reviewRoleRequestParamsSchema,
+    body: reviewRoleRequestBodySchema,
+    detail: {
+      tags: ["admin"],
+      summary: "Review a role request",
+      description: "Approve or reject a pending role request as admin.",
+    },
+    response: {
+      200: roleRequestResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
+      409: apiErrorResponseSchema,
     },
   },
 );

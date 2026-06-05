@@ -1,6 +1,13 @@
 import { z } from "zod";
 import type { Order } from "./contracts.ts";
-import { menuItemSchema, orderSchema, sessionUserSchema } from "./contracts.ts";
+import {
+  menuItemSchema,
+  orderSchema,
+  requestableRoleSchema,
+  roleRequestSchema,
+  roleRequestStatusSchema,
+  sessionUserSchema,
+} from "./contracts.ts";
 import toTaipeiDateTime from "../util.ts";
 
 export type { Order };
@@ -18,6 +25,14 @@ export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
 
 export const currentUserResponseSchema = z.object({
   user: sessionUserSchema,
+});
+
+export const roleRequestResponseSchema = z.object({
+  data: roleRequestSchema,
+});
+
+export const roleRequestListResponseSchema = z.object({
+  data: z.array(roleRequestSchema),
 });
 
 // ─── API Layer Order Response（Order 的 API 層呈現）──────────────────────
@@ -94,6 +109,30 @@ export const updateOrderBodySchema = z.object({
 /** POST /api/orders/:id/submit */
 export const submitOrderParamsSchema = z.object({
   id: z.string().regex(/^[0-9]+$/),
+});
+
+/** POST /api/users/me/role-request */
+export const createRoleRequestBodySchema = z.object({
+  requestedRole: requestableRoleSchema,
+  reason: z.string().min(10),
+});
+
+/** GET /api/admin/role-requests */
+export const listRoleRequestsQuerySchema = z.object({
+  status: z
+    .union([roleRequestStatusSchema, z.literal("all")])
+    .optional()
+    .default("pending"),
+});
+
+/** PATCH /api/admin/role-requests/:id */
+export const reviewRoleRequestParamsSchema = z.object({
+  id: z.string().regex(/^[0-9]+$/),
+});
+
+export const reviewRoleRequestBodySchema = z.object({
+  status: z.enum(["approved", "rejected"]),
+  reviewNote: z.string().optional(),
 });
 
 // ─── Response Schemas（API envelope 層）─────────────────────────────────
