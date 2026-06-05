@@ -4,6 +4,14 @@ import { z } from "zod";
 // 這裡是前後端共用的業務型別定義。
 // 型別（TypeScript type）由 Zod schema 自動推導，不需要手動維護兩份。
 
+export const roleSchema = z.enum([
+  "customer",
+  "staff",
+  "chef",
+  "owner",
+  "admin",
+]);
+
 export const menuItemSchema = z.object({
   id: z.string().min(1),
   entityId: z.string().min(1),
@@ -25,6 +33,7 @@ export const sessionUserSchema = z.object({
   id: z.string().min(1),
   email: z.string().min(3),
   name: z.string().min(1),
+  roles: z.array(roleSchema).min(1).default(["customer"]),
   // 注意：password 不在 API 業務層，只存在 DB 層（db/schema.ts）
 });
 
@@ -44,6 +53,7 @@ export const orderSchema = z.object({
 });
 
 // ─── Derived TypeScript Types（自動推導，永不過時）───────────────────────────
+export type Role = z.infer<typeof roleSchema>;
 export type MenuItem = z.infer<typeof menuItemSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
 export type User = SessionUser; // 與 SessionUser 相同（API 層不含 password）

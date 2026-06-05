@@ -6,6 +6,7 @@ import toTaipeiDateTime from "./util.ts";
 import {
   apiErrorResponseSchema,
   createMenuItemBodySchema,
+  currentUserResponseSchema,
   deleteMenuItemParamsSchema,
   getMenuHistoryParamsSchema,
   getOrderByIdParamsSchema,
@@ -25,6 +26,8 @@ import {
 } from "./shared/route-schemas.ts";
 import { createStore } from "./store/index.ts";
 import { auth, getCurrentUser } from "./auth/better-auth.ts";
+import { requireAnyRole } from "./shared/guards.ts";
+import type { Role } from "./shared/contracts.ts";
 
 // 從環境變量獲取配置
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -33,6 +36,13 @@ const allowedOrigin = process.env.API_ALLOWED_ORIGIN || "*";
 const store = createStore({ dataFilePath: "./data/store.json" });
 const hasPublicAssets =
   existsSync("./public") && existsSync("./public/index.html");
+const menuManagerRoles = ["owner", "admin"] as const satisfies readonly Role[];
+const orderViewerRoles = [
+  "staff",
+  "chef",
+  "owner",
+  "admin",
+] as const satisfies readonly Role[];
 
 // ─── Auth Helper ──────────────────────────────────────────────────────────────
 // 簡化的 helper 函數，用於保護路由並獲取 user，失敗時拋出 401 錯誤
@@ -44,6 +54,15 @@ async function requireUser(request: Request) {
       headers: { "Content-Type": "application/json" },
     });
   }
+  return user;
+}
+
+async function requireUserWithAnyRole(
+  request: Request,
+  roles: readonly Role[],
+) {
+  const user = await requireUser(request);
+  requireAnyRole(user, roles);
   return user;
 }
 
@@ -138,6 +157,25 @@ app.post("/api/sign-out", async ({ request }) => {
   return res;
 });
 
+app.get(
+  "/api/users/me",
+  async ({ request }) => {
+    const user = await requireUser(request);
+    return { user };
+  },
+  {
+    detail: {
+      tags: ["auth"],
+      summary: "Get current application user",
+      description: "Return the current signed-in user with application roles.",
+    },
+    response: {
+      200: currentUserResponseSchema,
+      401: apiErrorResponseSchema,
+    },
+  },
+);
+
 // 菜單路由
 app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
   detail: {
@@ -153,7 +191,7 @@ app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
 app.post(
   "/api/menu",
   async ({ body, request, set }) => {
-    await requireUser(request);
+    await requireUserWithAnyRole(request, menuManagerRoles);
     const newMenuItem = await store.createMenuItem(
       body as Parameters<typeof store.createMenuItem>[0],
     );
@@ -170,6 +208,7 @@ app.post(
     response: {
       201: menuItemResponseSchema,
       401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
     },
   },
 );
@@ -204,7 +243,7 @@ app.get(
 app.patch(
   "/api/menu/:id",
   async ({ params, body, request, set }) => {
-    await requireUser(request);
+    await requireUserWithAnyRole(request, menuManagerRoles);
     const menuItem = await store.updateMenuItem(params.id, body);
 
     if (!menuItem) {
@@ -225,6 +264,7 @@ app.patch(
     response: {
       200: menuItemResponseSchema,
       401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
       404: apiErrorResponseSchema,
     },
   },
@@ -233,7 +273,7 @@ app.patch(
 app.delete(
   "/api/menu/:id",
   async ({ params, request, set }) => {
-    await requireUser(request);
+    await requireUserWithAnyRole(request, menuManagerRoles);
     const removedMenuItem = await store.deleteMenuItem(params.id);
 
     if (!removedMenuItem) {
@@ -253,6 +293,7 @@ app.delete(
     response: {
       200: menuItemResponseSchema,
       401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
       404: apiErrorResponseSchema,
     },
   },
@@ -261,17 +302,23 @@ app.delete(
 // 訂單列表路由
 app.get(
   "/api/orders",
-  () => ({
-    data: store.getOrders().map(toOrderResponse),
-  }),
+  async ({ request }) => {
+    await requireUserWithAnyRole(request, orderViewerRoles);
+
+    return {
+      data: store.getOrders().map(toOrderResponse),
+    };
+  },
   {
     detail: {
       tags: ["orders"],
       summary: "List all orders",
-      description: "Return all orders stored in the demo backend.",
+      description: "Return all orders for staff, chef, owner, and admin users.",
     },
     response: {
       200: orderListResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
     },
   },
 );
@@ -540,6 +587,10 @@ if (hasPublicAssets) {
 
 // 全域錯誤處理
 app.onError(({ error, set, code }) => {
+  if (error instanceof Response) {
+    return error;
+  }
+
   if (code === "VALIDATION") {
     set.status = 400;
     return {

@@ -9,7 +9,7 @@ import { APP_SCHEMA_NAME } from "./schema-name.ts";
 // 4. pgSchema 與業務 schema 一致，V10.1 固定共用 bf_v10。
 //
 // 對照 shared/contracts.ts：
-//   SessionUser { id, email, name }  ← 只取這三欄對外暴露（auth/better-auth.ts 負責轉換）
+//   SessionUser { id, email, name, roles }  ← 只取這些欄位對外暴露（auth/better-auth.ts 負責轉換）
 //   password、emailVerified、image 等欄位屬於 DB 層，不進入 API contract。
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -24,6 +24,7 @@ export const user = appSchema.table("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  roles: text("roles").array().notNull().default(["customer"]),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });

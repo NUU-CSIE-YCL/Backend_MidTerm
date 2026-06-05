@@ -10,12 +10,22 @@ import type {
   ApiDataResponse,
   MenuItem,
   Order,
+  Role,
   SessionUser,
 } from "../../shared/contracts.ts";
+import { hasAnyRole } from "../../shared/guards.ts";
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const fallbackImageUrl =
   "https://images.unsplash.com/photo-1526318896980-cf78c088247c?auto=format&fit=crop&w=800&q=80";
+const menuManagerRoles = ["owner", "admin"] as const satisfies readonly Role[];
+const roleLabels: Record<Role, string> = {
+  customer: "顧客",
+  staff: "店員",
+  chef: "廚房",
+  owner: "店長",
+  admin: "管理員",
+};
 
 function buildApiUrl(path: string) {
   return `${apiBaseUrl}${path}`;
@@ -260,10 +270,10 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
 
-    // V9: 從 Better Auth session cookie 恢復登入狀態（不再用 localStorage）
+    // 從 app-level session endpoint 恢復登入狀態，包含 RBAC roles。
     async function restoreSession() {
       try {
-        const res = await fetch(buildApiUrl("/api/auth/get-session"), {
+        const res = await fetch(buildApiUrl("/api/users/me"), {
           credentials: "include",
         });
         if (res.ok) {
@@ -337,6 +347,8 @@ export default function App() {
 
     return { groupedItems, categories };
   }, [items]);
+
+  const canManageMenu = user ? hasAnyRole(user, menuManagerRoles) : false;
 
   const cartItemCount = useMemo(
     () => Object.values(cartQtyByItemId).reduce((sum, qty) => sum + qty, 0),
@@ -576,6 +588,10 @@ export default function App() {
           throw new Error("請重新登入後再管理菜單。");
         }
 
+        if (response.status === 403) {
+          throw new Error("目前角色沒有管理菜單的權限。");
+        }
+
         throw new Error(`Save menu item failed: HTTP ${response.status}`);
       }
 
@@ -629,6 +645,10 @@ export default function App() {
         if (response.status === 401) {
           setUser(null);
           throw new Error("請重新登入後再管理菜單。");
+        }
+
+        if (response.status === 403) {
+          throw new Error("目前角色沒有管理菜單的權限。");
         }
 
         throw new Error(`Retire menu item failed: HTTP ${response.status}`);
@@ -877,6 +897,11 @@ export default function App() {
             <div className="badge badge-outline">
               {user ? `已登入 ${user.name}` : "尚未登入"}
             </div>
+            {user ? (
+              <div className="badge badge-neutral">
+                角色 {user.roles.map((role) => roleLabels[role]).join("、")}
+              </div>
+            ) : null}
             <div className="badge badge-primary">
               {items.length} 個品項・{grouped.categories.length} 類
             </div>
@@ -939,14 +964,14 @@ export default function App() {
           </div>
         ) : null}
 
-        {user ? (
+        {canManageMenu ? (
           <section className="mb-8 rounded-lg border border-base-300 bg-base-100 shadow-sm">
             <div className="border-b border-base-300 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-2xl font-bold">菜單管理</h2>
                   <p className="text-sm opacity-70">
-                    登入使用者可新增、建立新版或下架目前菜單。
+                    owner/admin 可新增、建立新版或下架目前菜單。
                   </p>
                 </div>
                 <button

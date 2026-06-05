@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Order } from "./contracts.ts";
-import { menuItemSchema, orderSchema } from "./contracts.ts";
+import { menuItemSchema, orderSchema, sessionUserSchema } from "./contracts.ts";
 import toTaipeiDateTime from "../util.ts";
 
 export type { Order };
@@ -13,6 +13,12 @@ export const apiErrorResponseSchema = z.object({
 });
 
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
+
+// ─── API Layer Current User Response ───────────────────────────────────
+
+export const currentUserResponseSchema = z.object({
+  user: sessionUserSchema,
+});
 
 // ─── API Layer Order Response（Order 的 API 層呈現）──────────────────────
 
