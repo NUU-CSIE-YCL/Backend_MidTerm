@@ -1,9 +1,11 @@
 import { z } from "zod";
 import type { Order } from "./contracts.ts";
 import {
+  adminUserSchema,
   menuItemSchema,
   orderSchema,
   requestableRoleSchema,
+  roleSchema,
   roleRequestSchema,
   roleRequestStatusSchema,
   sessionUserSchema,
@@ -33,6 +35,14 @@ export const roleRequestResponseSchema = z.object({
 
 export const roleRequestListResponseSchema = z.object({
   data: z.array(roleRequestSchema),
+});
+
+export const adminUserResponseSchema = z.object({
+  data: adminUserSchema,
+});
+
+export const adminUserListResponseSchema = z.object({
+  data: z.array(adminUserSchema),
 });
 
 // ─── API Layer Order Response（Order 的 API 層呈現）──────────────────────
@@ -133,6 +143,15 @@ export const reviewRoleRequestParamsSchema = z.object({
 export const reviewRoleRequestBodySchema = z.object({
   status: z.enum(["approved", "rejected"]),
   reviewNote: z.string().optional(),
+});
+
+/** PATCH /api/admin/users/:userId/roles */
+export const updateAdminUserRolesParamsSchema = z.object({
+  userId: z.string().min(1),
+});
+
+export const updateAdminUserRolesBodySchema = z.object({
+  roles: z.array(roleSchema).min(1),
 });
 
 // ─── Response Schemas（API envelope 層）─────────────────────────────────

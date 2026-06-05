@@ -7,6 +7,7 @@ import {
 } from "react";
 import "./App.css";
 import type {
+  AdminUser,
   ApiDataResponse,
   MenuItem,
   Order,
@@ -16,13 +17,20 @@ import type {
   RoleRequestStatus,
   SessionUser,
 } from "../../shared/contracts.ts";
-import { hasAnyRole } from "../../shared/guards.ts";
+import { hasAnyRole, normalizeRoles } from "../../shared/guards.ts";
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const fallbackImageUrl =
   "https://images.unsplash.com/photo-1526318896980-cf78c088247c?auto=format&fit=crop&w=800&q=80";
 const menuManagerRoles = ["owner", "admin"] as const satisfies readonly Role[];
 const adminRoles = ["admin"] as const satisfies readonly Role[];
+const roleOptions = [
+  "customer",
+  "staff",
+  "chef",
+  "owner",
+  "admin",
+] as const satisfies readonly Role[];
 const requestableRoles = ["staff", "chef"] as const satisfies readonly RequestableRole[];
 const roleLabels: Record<Role, string> = {
   customer: "顧客",
@@ -237,6 +245,16 @@ export default function App() {
   >({});
   const [adminRoleRequestMessage, setAdminRoleRequestMessage] = useState("");
   const [adminRoleRequestError, setAdminRoleRequestError] = useState("");
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [isLoadingAdminUsers, setIsLoadingAdminUsers] = useState(false);
+  const [savingAdminUserId, setSavingAdminUserId] = useState<string | null>(
+    null,
+  );
+  const [rolesByUserId, setRolesByUserId] = useState<Record<string, Role[]>>(
+    {},
+  );
+  const [adminUsersMessage, setAdminUsersMessage] = useState("");
+  const [adminUsersError, setAdminUsersError] = useState("");
 
   function syncCartFromOrder(order: Order) {
     const nextQtyByItemId = order.items.reduce(
@@ -400,6 +418,45 @@ export default function App() {
     }
   }
 
+  async function loadAdminUsers(): Promise<void> {
+    if (!user || !hasAnyRole(user, adminRoles)) return;
+
+    setIsLoadingAdminUsers(true);
+    try {
+      const response = await fetch(buildApiUrl("/api/admin/users"), {
+        credentials: "include",
+      });
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再查看使用者角色。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有管理使用者的權限。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Load admin users failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<AdminUser[]>;
+      const users = Array.isArray(payload?.data) ? payload.data : [];
+      setAdminUsers(users);
+      setRolesByUserId(
+        users.reduce(
+          (acc, adminUser) => {
+            acc[adminUser.id] = normalizeRoles(adminUser.roles);
+            return acc;
+          },
+          {} as Record<string, Role[]>,
+        ),
+      );
+    } finally {
+      setIsLoadingAdminUsers(false);
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
 
@@ -452,10 +509,14 @@ export default function App() {
       setHistoryOrders([]);
       setMyRoleRequests([]);
       setAdminRoleRequests([]);
+      setAdminUsers([]);
+      setRolesByUserId({});
       setRoleRequestMessage("");
       setRoleRequestError("");
       setAdminRoleRequestMessage("");
       setAdminRoleRequestError("");
+      setAdminUsersMessage("");
+      setAdminUsersError("");
       setIsCartOpen(false);
       resetCartState();
       return;
@@ -475,6 +536,10 @@ export default function App() {
       void loadAdminRoleRequests().catch((adminLoadError) => {
         setAdminRoleRequestError("載入角色申請審核資料失敗，請稍後再試。");
         console.error(adminLoadError);
+      });
+      void loadAdminUsers().catch((adminUsersLoadError) => {
+        setAdminUsersError("載入使用者角色資料失敗，請稍後再試。");
+        console.error(adminUsersLoadError);
       });
     }
   }, [user]);
@@ -501,6 +566,7 @@ export default function App() {
 
   const canManageMenu = user ? hasAnyRole(user, menuManagerRoles) : false;
   const canReviewRoleRequests = user ? hasAnyRole(user, adminRoles) : false;
+  const canManageUsers = user ? hasAnyRole(user, adminRoles) : false;
   const availableRequestRoles = user
     ? requestableRoles.filter((role) => !user.roles.includes(role))
     : [];
@@ -964,6 +1030,84 @@ export default function App() {
       console.error(reviewError);
     } finally {
       setReviewingRoleRequestId(null);
+    }
+  }
+
+  function updateAdminUserRole(
+    targetUser: AdminUser,
+    role: Role,
+    checked: boolean,
+  ): void {
+    if (role === "customer") return;
+    if (user?.id === targetUser.id && role === "admin" && !checked) return;
+
+    setRolesByUserId((current) => {
+      const currentRoles = normalizeRoles(current[targetUser.id] ?? targetUser.roles);
+      const nextRoles = checked
+        ? normalizeRoles([...currentRoles, role])
+        : normalizeRoles(currentRoles.filter((currentRole) => currentRole !== role));
+
+      return {
+        ...current,
+        [targetUser.id]: nextRoles,
+      };
+    });
+  }
+
+  async function saveAdminUserRoles(targetUser: AdminUser): Promise<void> {
+    const roles = normalizeRoles(rolesByUserId[targetUser.id] ?? targetUser.roles);
+
+    setSavingAdminUserId(targetUser.id);
+    setAdminUsersError("");
+    setAdminUsersMessage("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/admin/users/${encodeURIComponent(targetUser.id)}/roles`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ roles }),
+        },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再管理使用者角色。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有管理使用者的權限。");
+      }
+
+      if (response.status === 404) {
+        throw new Error("找不到目標使用者。");
+      }
+
+      if (response.status === 409) {
+        throw new Error("不能移除自己的 admin 角色。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Update user roles failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<AdminUser>;
+      setAdminUsersMessage(`${payload.data.email} 的角色已更新。`);
+      await loadAdminUsers();
+      if (payload.data.id === user?.id) {
+        await refreshCurrentUser();
+      }
+    } catch (updateError) {
+      setAdminUsersError(
+        updateError instanceof Error
+          ? updateError.message
+          : "更新使用者角色失敗，請稍後再試。",
+      );
+      console.error(updateError);
+    } finally {
+      setSavingAdminUserId(null);
     }
   }
 
@@ -1517,6 +1661,130 @@ export default function App() {
                         ) : null}
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {canManageUsers ? (
+              <div className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold">使用者角色管理</h2>
+                    <p className="text-sm opacity-70">
+                      admin 可直接調整使用者角色；customer 會自動保留。
+                    </p>
+                  </div>
+                  <button
+                    className="btn btn-xs btn-outline"
+                    disabled={isLoadingAdminUsers}
+                    onClick={() => {
+                      void loadAdminUsers();
+                    }}
+                    type="button"
+                  >
+                    {isLoadingAdminUsers ? "讀取中" : "重新整理"}
+                  </button>
+                </div>
+
+                {adminUsersMessage ? (
+                  <div className="alert alert-success mb-3 py-2">
+                    <span>{adminUsersMessage}</span>
+                  </div>
+                ) : null}
+                {adminUsersError ? (
+                  <div className="alert alert-error mb-3 py-2">
+                    <span>{adminUsersError}</span>
+                  </div>
+                ) : null}
+
+                {isLoadingAdminUsers ? (
+                  <div className="alert py-2">
+                    <span>讀取中...</span>
+                  </div>
+                ) : adminUsers.length === 0 ? (
+                  <p className="text-sm opacity-70">目前沒有使用者資料。</p>
+                ) : (
+                  <div className="space-y-3">
+                    {adminUsers.map((adminUser) => {
+                      const selectedRoles = normalizeRoles(
+                        rolesByUserId[adminUser.id] ?? adminUser.roles,
+                      );
+                      const isSelf = user?.id === adminUser.id;
+
+                      return (
+                        <div
+                          className="rounded border border-base-300 bg-base-200 p-3 text-sm"
+                          key={adminUser.id}
+                        >
+                          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <div className="font-semibold">
+                                {adminUser.name}
+                                {isSelf ? (
+                                  <span className="badge badge-info badge-sm ml-2">
+                                    目前帳號
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="text-xs opacity-70">
+                                {adminUser.email}
+                              </div>
+                            </div>
+                            <button
+                              className="btn btn-primary btn-xs"
+                              disabled={savingAdminUserId === adminUser.id}
+                              onClick={() => {
+                                void saveAdminUserRoles(adminUser);
+                              }}
+                              type="button"
+                            >
+                              {savingAdminUserId === adminUser.id
+                                ? "儲存中"
+                                : "儲存角色"}
+                            </button>
+                          </div>
+
+                          <div className="flex flex-wrap gap-3">
+                            {roleOptions.map((role) => {
+                              const isLockedSelfAdmin =
+                                isSelf && role === "admin";
+                              const isCustomer = role === "customer";
+
+                              return (
+                                <label
+                                  className="label cursor-pointer gap-2 rounded bg-base-100 px-3 py-1"
+                                  key={role}
+                                >
+                                  <input
+                                    checked={selectedRoles.includes(role)}
+                                    className="checkbox checkbox-xs"
+                                    disabled={isCustomer || isLockedSelfAdmin}
+                                    onChange={(event) =>
+                                      updateAdminUserRole(
+                                        adminUser,
+                                        role,
+                                        event.target.checked,
+                                      )
+                                    }
+                                    type="checkbox"
+                                  />
+                                  <span className="label-text text-xs">
+                                    {roleLabels[role]}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+
+                          {isSelf ? (
+                            <p className="mt-2 text-xs opacity-70">
+                              為避免鎖住後台，不能移除自己的 admin 角色。
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

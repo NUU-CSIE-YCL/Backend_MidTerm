@@ -1,214 +1,138 @@
 # AGENTS.md
 
-本檔是給下一個 Codex/session 的交接紀錄。請先讀完本檔，再讀 `報告.md`，接著看 `git status --short`。
-
-## 目前結論
-
-- 專案目前已完成並已由使用者在 Render 線上驗證到 `V10.3A`。
-- 本輪已實作 `V10.3B 角色申請與 Admin 審核`，目前待使用者推上 Render 做線上驗證。
-- `V10.1 基礎版本化` 已完成：菜單品項版本化、訂單引用特定菜單版本、舊菜單版本不可再加入購物車或結帳。
-- `V10.2 菜單管理與版本展示` 已完成：登入後可在網站管理菜單、建立新版、下架、查版本歷史、顯示版本提示與圖片錯誤提示。
-- 下一階段若繼續做 admin 直接角色管理或更進階後台，應視為 `V10.3C` 或後續強化，不要再把 V10.1/V10.2/V10.3A 當成待完成項目。
+本檔是給下一個 Codex/session 的交接紀錄。請先讀完這份，再看 `報告.md` 與 `git status --short`。
 
 ## 專案脈絡
 
 - 專案位置：`C:\Users\user1\Desktop\NUU\BACKEND_W15_FOR_FINAL\bf1042`
 - 使用者語言偏好：繁體中文。
-- 專案主體：早餐店訂餐系統。
 - 技術棧：Bun + TypeScript + Elysia backend、React/Vite frontend、Drizzle ORM + Neon PostgreSQL、Better Auth + Google OAuth。
-- 第十週講義位置：`bf1042-docs-hub/bf1042-docs-hub/00_teaching/05_1_V10_RBAC權限系統設計與實作講義.md`
-- 使用者的部署驗收方式：GitHub 推上去後由 Render 部署，實際在 Render 網站與 Neon 資料庫驗證。
+- 第十週講義：`bf1042-docs-hub/bf1042-docs-hub/00_teaching/05_1_V10_RBAC權限系統設計與實作講義.md`
+- 驗收節奏：本機測試只是第一層；正式完成依據以使用者提供的 Render 部署、Render runtime、Neon migration、線上瀏覽器/API 驗證為準。
 
-## 已完成狀態
+## 目前版本狀態
 
-### V10.1 已完成並驗證
+### 已完成且 Render 驗證成功
 
-- `PG_SCHEMA` 目標為 `bf_v10`。
-- V10 migration 使用 `drizzle-v10/`，不再沿用 legacy `drizzle/` 的 V8/V9 migration。
-- `scripts/start.ts` 會在 Render 啟動時先執行 migration，再啟動後端。
-- `menu_items` 已版本化：
-  - `id` 是版本 ID，例如 `001-01`、`001-02`
-  - `logical_id` 表示同一品項
-  - `version` 表示版本序號
-  - `is_current_version` 表示目前可售版本
-  - `supersedes` 與 `change_reason` 用於版本追蹤
-- `order_items.menu_item_id` 指向特定 `menu_items.id`，歷史訂單會保留當時購買的菜單版本。
-- 加入購物車與送出訂單會檢查品項是否仍為 current version，過期版本會回 `409`。
+- `V10.1 基礎版本化`
+  - `PG_SCHEMA=bf_v10`
+  - `drizzle-v10/0000_v10_initial.sql`
+  - 菜單品項使用版本 ID，例如 `001-01`、`001-02`
+  - 訂單引用特定 `menu_items.id`
+  - 舊版菜單不可加入購物車，舊購物車送出會回 `409`
 
-### V10.2 已完成並驗證
-
-- 登入後顯示菜單管理 UI。
-- 可從網站新增品項、編輯品項建立新版、下架品項。
-- 菜單 mutation endpoint 已需要登入：
-  - `POST /api/menu`
-  - `PATCH /api/menu/:id`
-  - `DELETE /api/menu/:id`
-- 已新增版本歷史 API：
+- `V10.2 菜單管理與版本展示`
+  - 登入後可新增、編輯、下架菜單
   - `GET /api/menu/:id/history`
-  - `id` 可用 logical id 或版本 id
-- 前端菜單卡片會顯示 logical id、版本 badge、近期調整提示。
-- 管理 UI 可顯示版本歷史與修改原因。
-- 圖片 UX 已修正：
-  - 使用者輸入有效圖片 URL 時會顯示該圖片
-  - 圖片載入失敗時會明確顯示「圖片載入失敗，顯示備用圖」
-  - 失敗時提供「開啟原圖」連結
-  - 菜單管理表單有圖片 URL 即時預覽
+  - 菜單卡片顯示 logical id、版本 badge、近期更新提示
+  - 圖片 URL 預覽與錯誤提示已修正：失敗時顯示「圖片載入失敗」與原圖連結，不再讓使用者誤以為網址沒存
 
-### V10.3A 已完成並驗證
+- `V10.3A RBAC 基礎`
+  - `user.roles text[] not null default ARRAY['customer']`
+  - `RBAC_ADMIN_EMAILS` 自動授予初始 admin
+  - `GET /api/users/me`
+  - 菜單 mutation 需要 `owner/admin`
+  - `GET /api/orders` 需要 `staff/chef/owner/admin`
+  - 前端依 roles 顯示或隱藏菜單管理 UI
 
-- `bf_v10.user` 新增 `roles text[]`，預設 `["customer"]`。
-- 新增 migration：`drizzle-v10/0001_v10_rbac_roles.sql`，已加入 `drizzle-v10/meta/_journal.json`。
-- 新增 shared role contract：`customer | staff | chef | owner | admin`。
-- `SessionUser` 已包含 `roles`。
-- 新增 `shared/guards.ts`，提供 `hasRole`、`hasAnyRole`、`hasAllRoles`、`requireAnyRole`。
-- 新增 `GET /api/users/me`，回傳目前登入使用者與 roles。
-- `RBAC_ADMIN_EMAILS` 可用逗號分隔 email，自動把指定 Google 帳號補成 `admin`。
-- `POST/PATCH/DELETE /api/menu` 已改為只有 `owner/admin` 可操作。
-- `GET /api/orders` 已改為只有 `staff/chef/owner/admin` 可查看所有訂單。
-- 顧客自己的購物車、下單、訂單歷史流程維持不變。
-- 前端會顯示角色 badge，且只有 `owner/admin` 會看到菜單管理 UI。
-- 使用者已回報 Render 完全驗證成功。
+- `V10.3B 角色申請與 Admin 審核`
+  - `role_requests` table 與 migration：`drizzle-v10/0002_v10_role_requests.sql`
+  - 使用者可申請 `staff/chef`
+  - 同一使用者同時只能有一筆 pending 申請
+  - admin 可核准或拒絕申請
+  - 核准後角色會合併進目標使用者 roles，並保留 `customer`
+  - 使用者已回報 admin 驗證、staff/chef 申請與核准機制皆已在 Render 驗證成功
 
-### V10.3B 已本機實作，待 Render 驗證
+### 本輪正在實作
 
-- 新增 `role_requests` table。
-- 新增 migration：`drizzle-v10/0002_v10_role_requests.sql`，已加入 `drizzle-v10/meta/_journal.json`。
-- 新增 role request contracts 與 route schemas。
-- 一般使用者可申請 `staff` 或 `chef`。
-- 同一使用者同時間只能有一筆 `pending` 申請。
-- 已擁有的角色不能重複申請。
-- 新增 API：
-  - `POST /api/users/me/role-request`
-  - `GET /api/users/me/role-requests`
-  - `GET /api/admin/role-requests`
-  - `PATCH /api/admin/role-requests/:id`
-- admin 可查看、核准、拒絕角色申請。
-- admin 核准後會把 requested role 合併到目標使用者 roles，保留 `customer` 並去重。
-- 前端同頁新增「角色申請」卡片與 admin「角色申請審核」卡片。
+- `V10.3C Admin 使用者角色管理`
+  - 新增 `GET /api/admin/users`
+  - 新增 `PATCH /api/admin/users/:userId/roles`
+  - admin 可查看所有使用者與 roles
+  - admin 可直接分配或移除 `customer | staff | chef | owner | admin`
+  - 後端永遠保留 `customer`
+  - 禁止 admin 移除自己的 `admin` role，避免把自己鎖出後台
+  - 前端新增 admin-only「使用者角色管理」卡片
+  - 本輪不新增 migration，沿用 V10.3A 的 `user.roles`
 
 ## 重要檔案
 
-後端與資料模型：
+- Backend/API：`backend.ts`
+- Auth schema：`db/auth-schema.ts`
+- App schema：`db/schema.ts`
+- Menu repository：`db/repositories/menuRepository.ts`
+- Store abstraction：`store/Store.ts`
+- PostgreSQL store：`store/pg/PgStore.ts`
+- JSON fallback store：`store/json/JsonFileStore.ts`
+- Contracts：`shared/contracts.ts`
+- Route schemas：`shared/route-schemas.ts`
+- RBAC guards：`shared/guards.ts`
+- Frontend：`frontend/src/App.tsx`
+- V10 migrations：`drizzle-v10/`
+- Render startup：`scripts/start.ts`
+- Migration runner：`scripts/run-migration.ts`
+- Tests：`tests/v10-menu-versioning.test.ts`、`tests/v10-rbac.test.ts`、`tests/v10-role-requests.test.ts`、`tests/v10-admin-users.test.ts`
+- 報告：`報告.md`
 
-- `backend.ts`
-- `db/schema.ts`
-- `db/auth-schema.ts`
-- `db/schema-name.ts`
-- `db/repositories/menuRepository.ts`
-- `store/Store.ts`
-- `store/pg/PgStore.ts`
-- `store/json/JsonFileStore.ts`
-- `shared/contracts.ts`
-- `shared/route-schemas.ts`
-- `shared/guards.ts`
+Legacy `drizzle/` 是 V8/V9 migration，不要拿來當 V10 migration 來源。
 
-migration 與啟動：
+## 本機驗證命令
 
-- `drizzle-v10/0000_v10_initial.sql`
-- `drizzle-v10/0001_v10_rbac_roles.sql`
-- `drizzle-v10/0002_v10_role_requests.sql`
-- `drizzle-v10/meta/_journal.json`
-- `scripts/run-migration.ts`
-- `scripts/start.ts`
-- `drizzle.config.ts`
-
-前端：
-
-- `frontend/src/App.tsx`
-- `frontend/src/index.css`
-- `frontend/package.json`
-
-測試與文件：
-
-- `tests/v10-menu-versioning.test.ts`
-- `tests/v10-rbac.test.ts`
-- `tests/v10-role-requests.test.ts`
-- `報告.md`
-- `AGENTS.md`
-
-注意：`drizzle/` 是 legacy V8/V9 migration，不要把它當成 V10 migration 來源。
-
-## 已驗證
-
-本機驗證曾通過：
+V10.3C 本輪完成後建議跑：
 
 ```bash
 bun test
 bun run build
-bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts
 git diff --check
 ```
 
-Render 線上驗證已由使用者完成：
+注意：不要跑全 repo `bunx tsc --noEmit` 當作主要檢核，因為 repo 內有歷史教材備份檔，常引用舊 contracts 或舊 auth。
 
-- Render build 成功。
-- Render runtime 成功啟動。
-- migration 成功建立或沿用 `bf_v10` schema。
-- 網站可登入。
-- 可新增、編輯、下架菜單。
-- 改價後會建立新版，舊版不再是 current。
-- 可查看版本歷史。
-- 圖片 URL 顯示與失敗提示已驗證成功。
-- V10.3A RBAC 基礎切片已由使用者回報 Render 完全驗證成功。
+## Render 驗證清單
 
-V10.3A 本輪本機驗證已通過：
+V10.3C push 後請使用者在線上確認：
 
-```bash
-bun test
-bun run build
-bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts
-git diff --check
-```
-
-V10.3B 本輪本機驗證已通過：
-
-```bash
-bun test
-bun run build
-bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts
-git diff --check
-```
+- admin 登入後看到「使用者角色管理」區塊
+- `GET /api/admin/users` 只有 admin 可成功
+- admin 可把一般使用者加上 `owner`
+- 該使用者重新整理或重新登入後 navbar roles 顯示 `owner`，並可看到菜單管理區
+- admin 可移除一般使用者的 `owner`
+- 該使用者重新整理後看不到菜單管理區
+- admin 無法移除自己的 `admin` role
 
 ## Render/Neon 注意事項
 
-Render env 需要維持：
+Render env 至少需要：
 
 - `HOST=0.0.0.0`
 - `PG_SCHEMA=bf_v10`
 - `DATABASE_URL`
-- `DATABASE_URL_MIGRATION`，若部署時跑 migration 建議使用 direct/non-pooled Neon URL
+- `DATABASE_URL_MIGRATION`（部署時跑 migration 建議使用 direct/non-pooled Neon URL）
 - `BETTER_AUTH_SECRET`
 - `BETTER_AUTH_URL=https://<render-service>`
-- Google OAuth 相關 env
-- `RBAC_ADMIN_EMAILS=<你的 Google email>`，用於 V10.3A 初始 admin bootstrap
-- 必要時設定 `API_ALLOWED_ORIGIN`
+- Google OAuth env
+- `RBAC_ADMIN_EMAILS=<你的 Google email>`
+- 視部署方式設定 `API_ALLOWED_ORIGIN`
 
-`.env.example` 不會自動成為 Render env 來源。Render 的正式 env 由 Dashboard 匯入。
+V10.3C 不新增 migration；若 Render log 有 migration 訊息，應是既有 migration already applied 或正常略過。
 
-## 目前尚未做
+## 尚未做的後續項目
 
-這些屬於 V10.3C 或後續強化，不屬於 V10.3B：
+這些不是 V10.3C 範圍：
 
-- 直接分配或移除使用者角色的後台 UI。
-- owner/admin 自助申請或升級流程。
-- 菜單顯示排序 display order。
-- major/minor version。
-- A/B testing。
-- 促銷系統。
-- 更完整的購物車失效 UI，例如自動提示替換成新版。
-- 更細的管理者審計紀錄與後台操作紀錄。
+- 角色變更審計紀錄表
+- admin 使用者搜尋/分頁
+- owner/admin 角色申請流程
+- display order
+- major/minor version
+- A/B testing
+- 促銷系統
+- 廚房/店員專用作業台
 
-## 下一個 session 建議
+## 下一個 session 建議流程
 
-1. 先讀 `AGENTS.md` 與 `報告.md`。
-2. 看 `git status --short`，確認是否只有文件變更或是否有使用者新改動。
-3. 若使用者問目前進度，回答：V10.1、V10.2、V10.3A 都已完成並經 Render 驗證；V10.3B 已本機實作，待 Render 驗證。
-4. 若使用者要求繼續開發，先判斷是否進入 V10.3C；不要回頭重做 V10.1/V10.2/V10.3A。
-5. 涉及 Neon schema 或 migration 時要保守，先檢查 SQL，避免動到 legacy `bf_v8`、`bf_v9` 或舊 `drizzle/`。
-
-## 使用者偏好的工作流
-
-- 使用者期末專案期間偏好簡化流程：確認可運行後直接推 GitHub，交由 Render 部署驗證。
-- 若需要 force push，建議使用 `git push --force-with-lease`。
-- 本地測試可作為輔助，但正式驗收以 Render/Neon 線上行為為準。
-- 回報部署問題時，最有用的是 Render build log、runtime log、HTTP status/response body、瀏覽器 Network request 與 Neon migration output。
+1. 先讀本檔與 `報告.md`。
+2. 跑 `git status --short`，確認是否有未完成改動。
+3. 若正在接續 V10.3C，先看 `shared/contracts.ts`、`shared/route-schemas.ts`、`shared/guards.ts`、`backend.ts`、`frontend/src/App.tsx`、`tests/v10-admin-users.test.ts`。
+4. 先完成本機 test/build/tsc/diff，再交給使用者做 Render 線上驗證。

@@ -1,9 +1,6 @@
 import { z } from "zod";
 
-// ─── API Business Schemas（Single Source of Truth）──────────────────────────
-// 這裡是前後端共用的業務型別定義。
-// 型別（TypeScript type）由 Zod schema 自動推導，不需要手動維護兩份。
-
+// API business schemas: single source of truth for route contracts and TS types.
 export const roleSchema = z.enum([
   "customer",
   "staff",
@@ -42,7 +39,15 @@ export const sessionUserSchema = z.object({
   email: z.string().min(3),
   name: z.string().min(1),
   roles: z.array(roleSchema).min(1).default(["customer"]),
-  // 注意：password 不在 API 業務層，只存在 DB 層（db/schema.ts）
+});
+
+export const adminUserSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  email: z.string().min(3),
+  roles: z.array(roleSchema).min(1),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
 });
 
 export const orderItemSchema = z.object({
@@ -74,13 +79,13 @@ export const roleRequestSchema = z.object({
   requesterEmail: z.string().nullable().optional(),
 });
 
-// ─── Derived TypeScript Types（自動推導，永不過時）───────────────────────────
 export type Role = z.infer<typeof roleSchema>;
 export type RequestableRole = z.infer<typeof requestableRoleSchema>;
 export type RoleRequestStatus = z.infer<typeof roleRequestStatusSchema>;
 export type MenuItem = z.infer<typeof menuItemSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
-export type User = SessionUser; // 與 SessionUser 相同（API 層不含 password）
+export type AdminUser = z.infer<typeof adminUserSchema>;
+export type User = SessionUser;
 export type OrderItem = z.infer<typeof orderItemSchema>;
 export type Order = z.infer<typeof orderSchema>;
 export type RoleRequest = z.infer<typeof roleRequestSchema>;

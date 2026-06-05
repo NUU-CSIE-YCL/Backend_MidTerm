@@ -1,4 +1,13 @@
-import type { Role, SessionUser } from "./contracts.ts";
+import { roleSchema, type Role, type SessionUser } from "./contracts.ts";
+
+export function normalizeRoles(value: unknown): Role[] {
+  const rawRoles = Array.isArray(value) ? value : [];
+  const validRoles = rawRoles.filter((role): role is Role =>
+    roleSchema.safeParse(role).success,
+  );
+
+  return Array.from(new Set<Role>(["customer", ...validRoles]));
+}
 
 export function hasRole(user: SessionUser, role: Role): boolean {
   return user.roles.includes(role);

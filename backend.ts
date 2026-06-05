@@ -2,10 +2,12 @@ import { Elysia } from "elysia";
 import { openapi } from "@elysiajs/openapi";
 import { cors } from "@elysia/cors";
 import { existsSync } from "node:fs";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import toTaipeiDateTime from "./util.ts";
 import {
   apiErrorResponseSchema,
+  adminUserListResponseSchema,
+  adminUserResponseSchema,
   createMenuItemBodySchema,
   createRoleRequestBodySchema,
   currentUserResponseSchema,
@@ -26,6 +28,8 @@ import {
   roleRequestResponseSchema,
   submitOrderParamsSchema,
   toOrderResponse,
+  updateAdminUserRolesBodySchema,
+  updateAdminUserRolesParamsSchema,
   updateMenuItemBodySchema,
   updateMenuItemParamsSchema,
   updateOrderBodySchema,
@@ -36,8 +40,8 @@ import { auth, getCurrentUser } from "./auth/better-auth.ts";
 import { db } from "./db/client.ts";
 import { user as authUsersTable } from "./db/auth-schema.ts";
 import { roleRequestsTable } from "./db/schema.ts";
-import { requireAnyRole } from "./shared/guards.ts";
-import { roleSchema, type Role, type RoleRequest } from "./shared/contracts.ts";
+import { normalizeRoles, requireAnyRole } from "./shared/guards.ts";
+import type { AdminUser, Role, RoleRequest } from "./shared/contracts.ts";
 
 // 從環境變量獲取配置
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -77,19 +81,6 @@ async function requireUserWithAnyRole(
   return user;
 }
 
-function normalizeRoles(value: unknown): Role[] {
-  const source = Array.isArray(value) ? value : [];
-  const roles = source.filter((role): role is Role => {
-    return roleSchema.safeParse(role).success;
-  });
-
-  if (!roles.includes("customer")) {
-    roles.unshift("customer");
-  }
-
-  return [...new Set(roles)];
-}
-
 function toRoleRequestResponse(row: {
   id: number;
   userId: string;
@@ -121,6 +112,24 @@ function toRoleRequestResponse(row: {
     reviewNote: row.reviewNote,
     requesterName: row.requesterName ?? null,
     requesterEmail: row.requesterEmail ?? null,
+  };
+}
+
+function toAdminUserResponse(row: {
+  id: string;
+  name: string;
+  email: string;
+  roles: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}): AdminUser {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    roles: normalizeRoles(row.roles),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -483,6 +492,106 @@ app.patch(
 );
 
 // 菜單路由
+app.get(
+  "/api/admin/users",
+  async ({ request }) => {
+    await requireUserWithAnyRole(request, adminRoles);
+
+    const users = await db
+      .select({
+        id: authUsersTable.id,
+        name: authUsersTable.name,
+        email: authUsersTable.email,
+        roles: authUsersTable.roles,
+        createdAt: authUsersTable.createdAt,
+        updatedAt: authUsersTable.updatedAt,
+      })
+      .from(authUsersTable)
+      .orderBy(asc(authUsersTable.email));
+
+    return { data: users.map(toAdminUserResponse) };
+  },
+  {
+    detail: {
+      tags: ["admin"],
+      summary: "List users for role management",
+      description: "Return application users and roles for admin management.",
+    },
+    response: {
+      200: adminUserListResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.patch(
+  "/api/admin/users/:userId/roles",
+  async ({ params, body, request, set }) => {
+    const adminUser = await requireUserWithAnyRole(request, adminRoles);
+    const roleBody = body as { roles: Role[] };
+    const nextRoles = normalizeRoles(roleBody.roles);
+
+    const [targetUser] = await db
+      .select({
+        id: authUsersTable.id,
+        name: authUsersTable.name,
+        email: authUsersTable.email,
+        roles: authUsersTable.roles,
+        createdAt: authUsersTable.createdAt,
+        updatedAt: authUsersTable.updatedAt,
+      })
+      .from(authUsersTable)
+      .where(eq(authUsersTable.id, params.userId))
+      .limit(1);
+
+    if (!targetUser) {
+      set.status = 404;
+      return { error: "User not found" };
+    }
+
+    if (targetUser.id === adminUser.id && !nextRoles.includes("admin")) {
+      set.status = 409;
+      return { error: "Cannot remove your own admin role" };
+    }
+
+    const [updatedUser] = await db
+      .update(authUsersTable)
+      .set({
+        roles: nextRoles,
+        updatedAt: new Date(),
+      })
+      .where(eq(authUsersTable.id, targetUser.id))
+      .returning({
+        id: authUsersTable.id,
+        name: authUsersTable.name,
+        email: authUsersTable.email,
+        roles: authUsersTable.roles,
+        createdAt: authUsersTable.createdAt,
+        updatedAt: authUsersTable.updatedAt,
+      });
+
+    return { data: toAdminUserResponse(updatedUser!) };
+  },
+  {
+    params: updateAdminUserRolesParamsSchema,
+    body: updateAdminUserRolesBodySchema,
+    detail: {
+      tags: ["admin"],
+      summary: "Update a user's roles",
+      description:
+        "Set roles for a user. Customer is always preserved, and admins cannot remove their own admin role.",
+    },
+    response: {
+      200: adminUserResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
+      409: apiErrorResponseSchema,
+    },
+  },
+);
+
 app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
   detail: {
     tags: ["menu"],
