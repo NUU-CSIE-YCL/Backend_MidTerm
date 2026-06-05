@@ -1,5 +1,43 @@
 # AGENTS.md
 
+## 最新交接更新（2026-06-05）
+
+以本節為準：專案已從 V10.1 進入 V10.2。舊段落中「暫不做 V10.2 UX」的敘述已過時，僅保留作為歷史脈絡。
+
+已完成並待使用者推上 Render 驗證的 V10.2 內容：
+
+- 菜單管理 UI：登入後可新增品項、編輯品項建立新版、下架品項。
+- 菜單 mutation endpoint 已改為需要登入：`POST /api/menu`、`PATCH /api/menu/:id`、`DELETE /api/menu/:id`。
+- 新增版本歷史 API：`GET /api/menu/:id/history`，`id` 可用 logical id 或版本 id。
+- 菜單卡片與管理 UI 會顯示 logical id、版本 badge、近期調整提示與版本歷史。
+- 本輪修正圖片 UX：
+  - `frontend/src/App.tsx` 新增 `MenuImage` 與 `MenuImagePreview`。
+  - 圖片載入失敗時不再靜默切成固定 Unsplash 圖。
+  - 失敗時會明確顯示「圖片載入失敗，顯示備用圖」與「開啟原圖」連結。
+  - 菜單管理表單新增圖片 URL 即時預覽。
+  - 後端圖片儲存邏輯未變；`image_url` 仍維持寬鬆規則，允許 `https://...` 與站內相對路徑。
+
+本輪本機驗證已通過：
+
+```bash
+bun test
+bun run build
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts
+git diff --check
+```
+
+注意：`git diff --check` 在 Windows 只出現 LF/CRLF 提醒，沒有 whitespace error。
+
+接下來仍未做的是 V10.3：
+
+- 完整 RBAC/admin-only 權限。
+- display order。
+- major/minor version。
+- A/B testing。
+- 促銷系統。
+
+Render 線上圖片驗證交給使用者執行：登入後新增或編輯品項，分別貼入有效圖片直連 URL 與無效 URL。有效 URL 應直接顯示圖片；無效 URL 應顯示錯誤提示、備用圖標示與「開啟原圖」連結，且 `/api/menu` 的 `image_url` 應仍是使用者輸入的原始值。
+
 本檔是給下一個 Codex/session 的交接紀錄。請先讀完這份，再繼續實作或回報。
 
 ## 專案與對話脈絡

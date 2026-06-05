@@ -14,6 +14,8 @@ import type {
 } from "../../shared/contracts.ts";
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const fallbackImageUrl =
+  "https://images.unsplash.com/photo-1526318896980-cf78c088247c?auto=format&fit=crop&w=800&q=80";
 
 function buildApiUrl(path: string) {
   return `${apiBaseUrl}${path}`;
@@ -65,6 +67,78 @@ function formatVersionTime(value?: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function MenuImage({
+  src,
+  alt,
+  mode = "card",
+}: {
+  src: string;
+  alt: string;
+  mode?: "card" | "preview";
+}) {
+  const imageUrl = src.trim();
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [imageUrl]);
+
+  const isShowingFallback = imageUrl.length === 0 || hasError;
+  const displayedImageUrl = isShowingFallback ? fallbackImageUrl : imageUrl;
+  const noticeTitle =
+    imageUrl.length === 0
+      ? "尚未輸入圖片 URL"
+      : "圖片載入失敗，顯示備用圖";
+  const noticeHint =
+    mode === "preview"
+      ? "請使用可公開存取的圖片直連網址。"
+      : "原始圖片無法載入。";
+
+  return (
+    <div className="relative h-full w-full bg-base-300">
+      <img
+        src={displayedImageUrl}
+        alt={alt}
+        className="h-full w-full object-cover"
+        loading={mode === "card" ? "lazy" : "eager"}
+        onError={() => {
+          setHasError(true);
+        }}
+      />
+      {isShowingFallback ? (
+        <div className="absolute inset-x-2 bottom-2 rounded bg-base-100/95 p-2 text-xs shadow">
+          <p className="font-semibold text-warning">{noticeTitle}</p>
+          <p className="opacity-70">{noticeHint}</p>
+          {imageUrl ? (
+            <a
+              className="link link-primary"
+              href={imageUrl}
+              rel="noreferrer"
+              target="_blank"
+            >
+              開啟原圖
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MenuImagePreview({ imageUrl }: { imageUrl: string }) {
+  return (
+    <div className="rounded-lg border border-base-300 bg-base-100 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold">圖片預覽</span>
+        <span className="text-xs opacity-70">支援 https 或站內路徑</span>
+      </div>
+      <div className="h-36 overflow-hidden rounded bg-base-300">
+        <MenuImage src={imageUrl} alt="菜單圖片預覽" mode="preview" />
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -975,6 +1049,8 @@ export default function App() {
                   />
                 </label>
 
+                <MenuImagePreview imageUrl={menuForm.image_url} />
+
                 <label className="form-control">
                   <span className="label-text">描述</span>
                   <textarea
@@ -1178,16 +1254,9 @@ export default function App() {
                     className="card bg-base-100 shadow-md hover:shadow-lg transition-shadow"
                   >
                     <figure className="h-44 overflow-hidden bg-base-300">
-                      <img
+                      <MenuImage
                         src={item.image_url}
                         alt={item.name}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        onError={(event) => {
-                          const target = event.currentTarget;
-                          target.src =
-                            "https://images.unsplash.com/photo-1526318896980-cf78c088247c?auto=format&fit=crop&w=800&q=80";
-                        }}
                       />
                     </figure>
                     <div className="card-body">
