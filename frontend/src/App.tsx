@@ -13,6 +13,8 @@ import type {
   Order,
   RequestableRole,
   Role,
+  RoleAuditAction,
+  RoleAuditLog,
   RoleRequest,
   RoleRequestStatus,
   SessionUser,
@@ -47,6 +49,11 @@ const roleRequestStatusLabels: Record<RoleRequestStatus, string> = {
   pending: "待審核",
   approved: "已核准",
   rejected: "已拒絕",
+};
+const roleAuditActionLabels: Record<RoleAuditAction, string> = {
+  role_request_approved: "申請核准",
+  role_request_rejected: "申請拒絕",
+  admin_roles_updated: "直接更新",
 };
 
 function buildApiUrl(path: string) {
@@ -255,6 +262,12 @@ export default function App() {
   );
   const [adminUsersMessage, setAdminUsersMessage] = useState("");
   const [adminUsersError, setAdminUsersError] = useState("");
+  const [roleAuditLogs, setRoleAuditLogs] = useState<RoleAuditLog[]>([]);
+  const [roleAuditActionFilter, setRoleAuditActionFilter] = useState<
+    RoleAuditAction | "all"
+  >("all");
+  const [isLoadingRoleAuditLogs, setIsLoadingRoleAuditLogs] = useState(false);
+  const [roleAuditLogsError, setRoleAuditLogsError] = useState("");
 
   function syncCartFromOrder(order: Order) {
     const nextQtyByItemId = order.items.reduce(
@@ -457,6 +470,47 @@ export default function App() {
     }
   }
 
+  async function loadRoleAuditLogs(
+    action: RoleAuditAction | "all" = roleAuditActionFilter,
+  ): Promise<void> {
+    if (!user || !hasAnyRole(user, adminRoles)) return;
+
+    setIsLoadingRoleAuditLogs(true);
+    try {
+      const searchParams = new URLSearchParams();
+      if (action !== "all") {
+        searchParams.set("action", action);
+      }
+      const query = searchParams.toString();
+      const response = await fetch(
+        buildApiUrl(`/api/admin/role-audit-logs${query ? `?${query}` : ""}`),
+        {
+          credentials: "include",
+        },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再查看角色異動紀錄。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有查看角色異動紀錄的權限。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Load role audit logs failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<
+        RoleAuditLog[]
+      >;
+      setRoleAuditLogs(Array.isArray(payload?.data) ? payload.data : []);
+    } finally {
+      setIsLoadingRoleAuditLogs(false);
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
 
@@ -510,6 +564,7 @@ export default function App() {
       setMyRoleRequests([]);
       setAdminRoleRequests([]);
       setAdminUsers([]);
+      setRoleAuditLogs([]);
       setRolesByUserId({});
       setRoleRequestMessage("");
       setRoleRequestError("");
@@ -517,6 +572,7 @@ export default function App() {
       setAdminRoleRequestError("");
       setAdminUsersMessage("");
       setAdminUsersError("");
+      setRoleAuditLogsError("");
       setIsCartOpen(false);
       resetCartState();
       return;
@@ -540,6 +596,10 @@ export default function App() {
       void loadAdminUsers().catch((adminUsersLoadError) => {
         setAdminUsersError("載入使用者角色資料失敗，請稍後再試。");
         console.error(adminUsersLoadError);
+      });
+      void loadRoleAuditLogs().catch((roleAuditLoadError) => {
+        setRoleAuditLogsError("載入角色異動紀錄失敗，請稍後再試。");
+        console.error(roleAuditLoadError);
       });
     }
   }, [user]);
@@ -1019,6 +1079,7 @@ export default function App() {
       await Promise.all([
         loadAdminRoleRequests(adminRoleRequestFilter),
         loadMyRoleRequests(),
+        loadRoleAuditLogs(roleAuditActionFilter),
         refreshCurrentUser(),
       ]);
     } catch (reviewError) {
@@ -1095,7 +1156,10 @@ export default function App() {
 
       const payload = (await response.json()) as ApiDataResponse<AdminUser>;
       setAdminUsersMessage(`${payload.data.email} 的角色已更新。`);
-      await loadAdminUsers();
+      await Promise.all([
+        loadAdminUsers(),
+        loadRoleAuditLogs(roleAuditActionFilter),
+      ]);
       if (payload.data.id === user?.id) {
         await refreshCurrentUser();
       }
@@ -1785,6 +1849,145 @@ export default function App() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {canManageUsers ? (
+              <div className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold">角色異動紀錄</h2>
+                    <p className="text-sm opacity-70">
+                      記錄 admin 審核與直接調整角色的操作軌跡。
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <select
+                      className="select select-bordered select-sm"
+                      onChange={(event) => {
+                        const nextAction = event.target.value as
+                          | RoleAuditAction
+                          | "all";
+                        setRoleAuditActionFilter(nextAction);
+                        setRoleAuditLogsError("");
+                        void loadRoleAuditLogs(nextAction);
+                      }}
+                      value={roleAuditActionFilter}
+                    >
+                      <option value="all">全部</option>
+                      <option value="role_request_approved">申請核准</option>
+                      <option value="role_request_rejected">申請拒絕</option>
+                      <option value="admin_roles_updated">直接更新</option>
+                    </select>
+                    <button
+                      className="btn btn-xs btn-outline"
+                      disabled={isLoadingRoleAuditLogs}
+                      onClick={() => {
+                        void loadRoleAuditLogs();
+                      }}
+                      type="button"
+                    >
+                      {isLoadingRoleAuditLogs ? "讀取中" : "重新整理"}
+                    </button>
+                  </div>
+                </div>
+
+                {roleAuditLogsError ? (
+                  <div className="alert alert-error mb-3 py-2">
+                    <span>{roleAuditLogsError}</span>
+                  </div>
+                ) : null}
+
+                {isLoadingRoleAuditLogs ? (
+                  <div className="alert py-2">
+                    <span>讀取中...</span>
+                  </div>
+                ) : roleAuditLogs.length === 0 ? (
+                  <p className="text-sm opacity-70">目前沒有角色異動紀錄。</p>
+                ) : (
+                  <div className="space-y-3">
+                    {roleAuditLogs.map((auditLog) => (
+                      <div
+                        className="rounded border border-base-300 bg-base-200 p-3 text-sm"
+                        key={auditLog.id}
+                      >
+                        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold">
+                              {roleAuditActionLabels[auditLog.action]}
+                            </div>
+                            <div className="text-xs opacity-70">
+                              {formatVersionTime(auditLog.createdAt)}
+                            </div>
+                          </div>
+                          <span className="badge badge-outline">
+                            {auditLog.source}
+                          </span>
+                        </div>
+
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <div>
+                            <div className="text-xs opacity-70">操作者</div>
+                            <div>
+                              {auditLog.actorName ?? "系統"}
+                              <span className="ml-1 text-xs opacity-70">
+                                {auditLog.actorEmail ?? auditLog.actorUserId}
+                              </span>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs opacity-70">目標使用者</div>
+                            <div>
+                              {auditLog.targetName ?? "未知使用者"}
+                              <span className="ml-1 text-xs opacity-70">
+                                {auditLog.targetEmail ?? auditLog.targetUserId}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 md:grid-cols-2">
+                          <div>
+                            <div className="mb-1 text-xs opacity-70">
+                              變更前
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {auditLog.oldRoles.map((role) => (
+                                <span
+                                  className="badge badge-ghost badge-sm"
+                                  key={`${auditLog.id}-old-${role}`}
+                                >
+                                  {roleLabels[role]}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="mb-1 text-xs opacity-70">
+                              變更後
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {auditLog.newRoles.map((role) => (
+                                <span
+                                  className="badge badge-info badge-sm"
+                                  key={`${auditLog.id}-new-${role}`}
+                                >
+                                  {roleLabels[role]}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {auditLog.note ? (
+                          <p className="mt-2 text-xs opacity-70">
+                            備註：{auditLog.note}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

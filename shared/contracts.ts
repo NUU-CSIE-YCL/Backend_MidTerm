@@ -17,6 +17,12 @@ export const roleRequestStatusSchema = z.enum([
   "rejected",
 ]);
 
+export const roleAuditActionSchema = z.enum([
+  "role_request_approved",
+  "role_request_rejected",
+  "admin_roles_updated",
+]);
+
 export const menuItemSchema = z.object({
   id: z.string().min(1),
   entityId: z.string().min(1),
@@ -79,9 +85,27 @@ export const roleRequestSchema = z.object({
   requesterEmail: z.string().nullable().optional(),
 });
 
+export const roleAuditLogSchema = z.object({
+  id: z.number().int().min(1),
+  actorUserId: z.string().min(1).nullable(),
+  targetUserId: z.string().min(1),
+  action: roleAuditActionSchema,
+  oldRoles: z.array(roleSchema),
+  newRoles: z.array(roleSchema),
+  source: z.string().min(1),
+  roleRequestId: z.number().int().min(1).nullable().optional(),
+  note: z.string().nullable().optional(),
+  createdAt: z.string().min(1),
+  actorName: z.string().nullable().optional(),
+  actorEmail: z.string().nullable().optional(),
+  targetName: z.string().nullable().optional(),
+  targetEmail: z.string().nullable().optional(),
+});
+
 export type Role = z.infer<typeof roleSchema>;
 export type RequestableRole = z.infer<typeof requestableRoleSchema>;
 export type RoleRequestStatus = z.infer<typeof roleRequestStatusSchema>;
+export type RoleAuditAction = z.infer<typeof roleAuditActionSchema>;
 export type MenuItem = z.infer<typeof menuItemSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
@@ -89,6 +113,7 @@ export type User = SessionUser;
 export type OrderItem = z.infer<typeof orderItemSchema>;
 export type Order = z.infer<typeof orderSchema>;
 export type RoleRequest = z.infer<typeof roleRequestSchema>;
+export type RoleAuditLog = z.infer<typeof roleAuditLogSchema>;
 
 export interface ApiDataResponse<T> {
   data: T;

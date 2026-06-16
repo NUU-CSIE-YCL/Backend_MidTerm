@@ -5,6 +5,8 @@ import {
   menuItemSchema,
   orderSchema,
   requestableRoleSchema,
+  roleAuditActionSchema,
+  roleAuditLogSchema,
   roleSchema,
   roleRequestSchema,
   roleRequestStatusSchema,
@@ -43,6 +45,10 @@ export const adminUserResponseSchema = z.object({
 
 export const adminUserListResponseSchema = z.object({
   data: z.array(adminUserSchema),
+});
+
+export const roleAuditLogListResponseSchema = z.object({
+  data: z.array(roleAuditLogSchema),
 });
 
 // ─── API Layer Order Response（Order 的 API 層呈現）──────────────────────
@@ -152,6 +158,13 @@ export const updateAdminUserRolesParamsSchema = z.object({
 
 export const updateAdminUserRolesBodySchema = z.object({
   roles: z.array(roleSchema).min(1),
+});
+
+/** GET /api/admin/role-audit-logs */
+export const listRoleAuditLogsQuerySchema = z.object({
+  targetUserId: z.string().min(1).optional(),
+  actorUserId: z.string().min(1).optional(),
+  action: roleAuditActionSchema.optional(),
 });
 
 // ─── Response Schemas（API envelope 層）─────────────────────────────────

@@ -113,3 +113,39 @@ export const roleRequestsTable = appSchema.table(
     roleRequestsStatusIdx: index("role_requests_status_idx").on(table.status),
   }),
 );
+
+export const roleAuditLogsTable = appSchema.table(
+  "role_audit_logs",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    actorUserId: text("actor_user_id").references(() => user.id),
+    targetUserId: text("target_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    oldRoles: text("old_roles").array().notNull(),
+    newRoles: text("new_roles").array().notNull(),
+    source: text("source").notNull(),
+    roleRequestId: integer("role_request_id").references(
+      () => roleRequestsTable.id,
+    ),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    roleAuditLogsCreatedAtIdx: index("role_audit_logs_created_at_idx").on(
+      table.createdAt,
+    ),
+    roleAuditLogsActorIdx: index("role_audit_logs_actor_idx").on(
+      table.actorUserId,
+    ),
+    roleAuditLogsTargetIdx: index("role_audit_logs_target_idx").on(
+      table.targetUserId,
+    ),
+    roleAuditLogsActionIdx: index("role_audit_logs_action_idx").on(
+      table.action,
+    ),
+  }),
+);

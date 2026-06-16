@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { openapi } from "@elysiajs/openapi";
 import { cors } from "@elysia/cors";
 import { existsSync } from "node:fs";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, type SQL } from "drizzle-orm";
 import toTaipeiDateTime from "./util.ts";
 import {
   apiErrorResponseSchema,
@@ -15,6 +15,7 @@ import {
   getMenuHistoryParamsSchema,
   getOrderByIdParamsSchema,
   healthResponseSchema,
+  listRoleAuditLogsQuerySchema,
   listRoleRequestsQuerySchema,
   menuHistoryResponseSchema,
   menuItemResponseSchema,
@@ -26,6 +27,7 @@ import {
   reviewRoleRequestParamsSchema,
   roleRequestListResponseSchema,
   roleRequestResponseSchema,
+  roleAuditLogListResponseSchema,
   submitOrderParamsSchema,
   toOrderResponse,
   updateAdminUserRolesBodySchema,
@@ -39,9 +41,15 @@ import { createStore } from "./store/index.ts";
 import { auth, getCurrentUser } from "./auth/better-auth.ts";
 import { db } from "./db/client.ts";
 import { user as authUsersTable } from "./db/auth-schema.ts";
-import { roleRequestsTable } from "./db/schema.ts";
+import { roleAuditLogsTable, roleRequestsTable } from "./db/schema.ts";
 import { normalizeRoles, requireAnyRole } from "./shared/guards.ts";
-import type { AdminUser, Role, RoleRequest } from "./shared/contracts.ts";
+import type {
+  AdminUser,
+  Role,
+  RoleAuditAction,
+  RoleAuditLog,
+  RoleRequest,
+} from "./shared/contracts.ts";
 
 // 從環境變量獲取配置
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -131,6 +139,70 @@ function toAdminUserResponse(row: {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function toRoleAuditLogResponse(row: {
+  id: number;
+  actorUserId: string | null;
+  targetUserId: string;
+  action: string;
+  oldRoles: unknown;
+  newRoles: unknown;
+  source: string;
+  roleRequestId: number | null;
+  note: string | null;
+  createdAt: Date;
+  actorName?: string | null;
+  actorEmail?: string | null;
+  targetName?: string | null;
+  targetEmail?: string | null;
+}): RoleAuditLog {
+  const action = [
+    "role_request_approved",
+    "role_request_rejected",
+    "admin_roles_updated",
+  ].includes(row.action)
+    ? (row.action as RoleAuditAction)
+    : "admin_roles_updated";
+
+  return {
+    id: row.id,
+    actorUserId: row.actorUserId,
+    targetUserId: row.targetUserId,
+    action,
+    oldRoles: normalizeRoles(row.oldRoles),
+    newRoles: normalizeRoles(row.newRoles),
+    source: row.source,
+    roleRequestId: row.roleRequestId,
+    note: row.note,
+    createdAt: row.createdAt.toISOString(),
+    actorName: row.actorName ?? null,
+    actorEmail: row.actorEmail ?? null,
+    targetName: row.targetName ?? null,
+    targetEmail: row.targetEmail ?? null,
+  };
+}
+
+async function createRoleAuditLog(input: {
+  actorUserId: string | null;
+  targetUserId: string;
+  action: RoleAuditAction;
+  oldRoles: Role[];
+  newRoles: Role[];
+  source: string;
+  roleRequestId?: number | null;
+  note?: string | null;
+}) {
+  await db.insert(roleAuditLogsTable).values({
+    actorUserId: input.actorUserId,
+    targetUserId: input.targetUserId,
+    action: input.action,
+    oldRoles: normalizeRoles(input.oldRoles),
+    newRoles: normalizeRoles(input.newRoles),
+    source: input.source,
+    roleRequestId: input.roleRequestId ?? null,
+    note: input.note?.trim() || null,
+  });
 }
 
 const app = new Elysia();
@@ -416,6 +488,19 @@ app.patch(
       return { error: "This request has already been reviewed" };
     }
 
+    const [targetUserBeforeReview] = await db
+      .select({
+        roles: authUsersTable.roles,
+      })
+      .from(authUsersTable)
+      .where(eq(authUsersTable.id, existingRequest.userId))
+      .limit(1);
+    const oldRoles = normalizeRoles(targetUserBeforeReview?.roles);
+    const nextRoles =
+      reviewBody.status === "approved"
+        ? normalizeRoles([...oldRoles, existingRequest.requestedRole])
+        : oldRoles;
+
     const [updatedRequest] = await db
       .update(roleRequestsTable)
       .set({
@@ -427,30 +512,29 @@ app.patch(
       .where(eq(roleRequestsTable.id, requestId))
       .returning();
 
-    if (reviewBody.status === "approved") {
-      const [targetUser] = await db
-        .select({
-          roles: authUsersTable.roles,
+    if (reviewBody.status === "approved" && targetUserBeforeReview) {
+      await db
+        .update(authUsersTable)
+        .set({
+          roles: nextRoles,
+          updatedAt: new Date(),
         })
-        .from(authUsersTable)
-        .where(eq(authUsersTable.id, existingRequest.userId))
-        .limit(1);
-
-      if (targetUser) {
-        const nextRoles = normalizeRoles([
-          ...normalizeRoles(targetUser.roles),
-          existingRequest.requestedRole,
-        ]);
-
-        await db
-          .update(authUsersTable)
-          .set({
-            roles: nextRoles,
-            updatedAt: new Date(),
-          })
-          .where(eq(authUsersTable.id, existingRequest.userId));
-      }
+        .where(eq(authUsersTable.id, existingRequest.userId));
     }
+
+    await createRoleAuditLog({
+      actorUserId: reviewer.id,
+      targetUserId: existingRequest.userId,
+      action:
+        reviewBody.status === "approved"
+          ? "role_request_approved"
+          : "role_request_rejected",
+      oldRoles,
+      newRoles: nextRoles,
+      source: "role_request_review",
+      roleRequestId: existingRequest.id,
+      note: reviewBody.reviewNote ?? existingRequest.reason,
+    });
 
     const [requestWithUser] = await db
       .select({
@@ -555,6 +639,7 @@ app.patch(
       return { error: "Cannot remove your own admin role" };
     }
 
+    const oldRoles = normalizeRoles(targetUser.roles);
     const [updatedUser] = await db
       .update(authUsersTable)
       .set({
@@ -570,6 +655,16 @@ app.patch(
         createdAt: authUsersTable.createdAt,
         updatedAt: authUsersTable.updatedAt,
       });
+
+    await createRoleAuditLog({
+      actorUserId: adminUser.id,
+      targetUserId: targetUser.id,
+      action: "admin_roles_updated",
+      oldRoles,
+      newRoles: nextRoles,
+      source: "admin_user_roles",
+      note: "Admin updated user roles directly.",
+    });
 
     return { data: toAdminUserResponse(updatedUser!) };
   },
@@ -588,6 +683,77 @@ app.patch(
       403: apiErrorResponseSchema,
       404: apiErrorResponseSchema,
       409: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/admin/role-audit-logs",
+  async ({ query, request }) => {
+    await requireUserWithAnyRole(request, adminRoles);
+    const filters = query as {
+      targetUserId?: string;
+      actorUserId?: string;
+      action?: RoleAuditAction;
+    };
+    const conditions: SQL[] = [];
+
+    if (filters.targetUserId) {
+      conditions.push(eq(roleAuditLogsTable.targetUserId, filters.targetUserId));
+    }
+    if (filters.actorUserId) {
+      conditions.push(eq(roleAuditLogsTable.actorUserId, filters.actorUserId));
+    }
+    if (filters.action) {
+      conditions.push(eq(roleAuditLogsTable.action, filters.action));
+    }
+
+    const selectLogs = () => db.select().from(roleAuditLogsTable);
+    const logs =
+      conditions.length > 0
+        ? await selectLogs()
+            .where(and(...conditions))
+            .orderBy(desc(roleAuditLogsTable.createdAt))
+            .limit(100)
+        : await selectLogs()
+            .orderBy(desc(roleAuditLogsTable.createdAt))
+            .limit(100);
+
+    const users = await db
+      .select({
+        id: authUsersTable.id,
+        name: authUsersTable.name,
+        email: authUsersTable.email,
+      })
+      .from(authUsersTable);
+    const userById = new Map(users.map((user) => [user.id, user]));
+
+    return {
+      data: logs.map((log) => {
+        const actor = log.actorUserId ? userById.get(log.actorUserId) : null;
+        const target = userById.get(log.targetUserId);
+        return toRoleAuditLogResponse({
+          ...log,
+          actorName: actor?.name ?? null,
+          actorEmail: actor?.email ?? null,
+          targetName: target?.name ?? null,
+          targetEmail: target?.email ?? null,
+        });
+      }),
+    };
+  },
+  {
+    query: listRoleAuditLogsQuerySchema,
+    detail: {
+      tags: ["admin"],
+      summary: "List role audit logs",
+      description:
+        "Return the latest role audit logs for admin review, with optional actor, target, and action filters.",
+    },
+    response: {
+      200: roleAuditLogListResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
     },
   },
 );

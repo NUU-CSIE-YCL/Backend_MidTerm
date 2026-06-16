@@ -22,6 +22,13 @@
       "when": 1780689600000,
       "tag": "0002_v10_role_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780776000000,
+      "tag": "0003_v10_role_audit_logs",
+      "breakpoints": true
     }
   ]
 }
