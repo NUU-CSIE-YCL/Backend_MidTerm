@@ -75,6 +75,7 @@ export const orderSchema = z.object({
   items: z.array(orderItemSchema),
   total: z.number().min(0),
   status: orderStatusSchema,
+  customerNote: z.string(),
   createdAt: z.string().min(1),
   submittedAt: z.string().min(1).optional(),
 });

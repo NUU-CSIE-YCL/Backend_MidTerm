@@ -230,6 +230,8 @@ export class JsonFileStore implements Store {
         orders: parsed.orders.map((order) => ({
           ...order,
           userId: normalizeUserId(order.userId ?? fallbackUserId),
+          customerNote:
+            typeof order.customerNote === "string" ? order.customerNote : "",
           items: order.items.map((orderItem) => ({
             ...orderItem,
             item: normalizeMenuItem(orderItem.item),
@@ -402,6 +404,7 @@ export class JsonFileStore implements Store {
       items: [],
       total: 0,
       status: "pending",
+      customerNote: "",
       createdAt: new Date().toISOString(),
     };
 
@@ -483,7 +486,7 @@ export class JsonFileStore implements Store {
 
   async submitOrder(
     orderId: number,
-    input: { userId: string },
+    input: { userId: string; customerNote?: string },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -522,6 +525,7 @@ export class JsonFileStore implements Store {
     }
 
     order.status = "submitted";
+    order.customerNote = (input.customerNote ?? "").trim();
     order.submittedAt = new Date().toISOString();
     await this.persist();
 

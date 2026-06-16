@@ -55,6 +55,7 @@ export const roleAuditLogListResponseSchema = z.object({
 
 export const orderResponseSchema = orderSchema.extend({
   createdAtTaipei: z.string().min(1),
+  pickupCode: z.string().min(1),
 });
 
 export type OrderResponse = z.infer<typeof orderResponseSchema>;
@@ -67,6 +68,7 @@ export function toOrderResponse(order: Order): OrderResponse {
   return {
     ...order,
     createdAtTaipei: toTaipeiDateTime(order.createdAt),
+    pickupCode: `A-${String(order.id).padStart(4, "0")}`,
   };
 }
 
@@ -126,6 +128,13 @@ export const updateOrderBodySchema = z.object({
 export const submitOrderParamsSchema = z.object({
   id: z.string().regex(/^[0-9]+$/),
 });
+
+export const submitOrderBodySchema = z
+  .object({
+    customerNote: z.string().trim().max(120).optional(),
+  })
+  .optional()
+  .default({});
 
 /** PATCH /api/orders/:id/status */
 export const updateOrderStatusParamsSchema = z.object({

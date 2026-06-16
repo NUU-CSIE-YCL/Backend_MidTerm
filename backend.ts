@@ -28,6 +28,7 @@ import {
   roleRequestListResponseSchema,
   roleRequestResponseSchema,
   roleAuditLogListResponseSchema,
+  submitOrderBodySchema,
   submitOrderParamsSchema,
   toOrderResponse,
   updateAdminUserRolesBodySchema,
@@ -1169,10 +1170,14 @@ app.patch(
 // 送出訂單
 app.post(
   "/api/orders/:id/submit",
-  async ({ params, request, set }) => {
+  async ({ params, body, request, set }) => {
     const user = await requireUser(request);
     const orderId = parseInt(params.id, 10);
-    const result = await store.submitOrder(orderId, { userId: user.id });
+    const submitBody = (body ?? {}) as { customerNote?: string };
+    const result = await store.submitOrder(orderId, {
+      userId: user.id,
+      customerNote: submitBody.customerNote,
+    });
 
     if (!("code" in result)) {
       return { data: toOrderResponse(result.order) };
@@ -1204,6 +1209,7 @@ app.post(
   },
   {
     params: submitOrderParamsSchema,
+    body: submitOrderBodySchema,
     detail: {
       tags: ["orders"],
       summary: "Submit order",

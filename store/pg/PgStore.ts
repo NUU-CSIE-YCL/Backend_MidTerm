@@ -206,6 +206,7 @@ export class PgStore implements Store {
       items: [],
       total: inserted.total,
       status: "pending",
+      customerNote: inserted.customerNote ?? "",
       createdAt:
         inserted.createdAt instanceof Date
           ? inserted.createdAt.toISOString()
@@ -300,7 +301,7 @@ export class PgStore implements Store {
 
   async submitOrder(
     orderId: number,
-    input: { userId: string },
+    input: { userId: string; customerNote?: string },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -329,14 +330,20 @@ export class PgStore implements Store {
     }
 
     const submittedAt = new Date().toISOString();
+    const customerNote = (input.customerNote ?? "").trim();
 
     await db
       .update(ordersTable)
-      .set({ status: "submitted", submittedAt: new Date(submittedAt) })
+      .set({
+        status: "submitted",
+        submittedAt: new Date(submittedAt),
+        customerNote,
+      })
       .where(eq(ordersTable.id, orderId));
 
     order.status = "submitted";
     order.submittedAt = submittedAt;
+    order.customerNote = customerNote;
 
     return { ok: true, order };
   }
@@ -497,6 +504,7 @@ export class PgStore implements Store {
       items: itemsByOrderId.get(row.id) ?? [],
       total: row.total,
       status: normalizeOrderStatus(row.status),
+      customerNote: row.customerNote ?? "",
       createdAt:
         row.createdAt instanceof Date
           ? row.createdAt.toISOString()

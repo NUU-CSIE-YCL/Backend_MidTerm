@@ -29,6 +29,13 @@
       "when": 1780776000000,
       "tag": "0003_v10_role_audit_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780862400000,
+      "tag": "0004_v10_order_pickup_info",
+      "breakpoints": true
     }
   ]
 }

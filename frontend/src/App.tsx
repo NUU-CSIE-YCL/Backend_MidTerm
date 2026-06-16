@@ -86,6 +86,10 @@ interface MenuFormState {
   change_reason: string;
 }
 
+type AppOrder = Order & {
+  pickupCode: string;
+};
+
 function createEmptyMenuForm(): MenuFormState {
   return {
     logical_id: "",
@@ -232,9 +236,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [orderId, setOrderId] = useState<number | null>(null);
-  const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
+  const [historyOrders, setHistoryOrders] = useState<AppOrder[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [workbenchOrders, setWorkbenchOrders] = useState<Order[]>([]);
+  const [workbenchOrders, setWorkbenchOrders] = useState<AppOrder[]>([]);
   const [workbenchLoading, setWorkbenchLoading] = useState(false);
   const [workbenchError, setWorkbenchError] = useState("");
   const [updatingWorkbenchOrderId, setUpdatingWorkbenchOrderId] = useState<
@@ -249,6 +253,7 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isClearingCart, setIsClearingCart] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [customerNote, setCustomerNote] = useState("");
   const [menuForm, setMenuForm] = useState<MenuFormState>(() =>
     createEmptyMenuForm(),
   );
@@ -377,7 +382,7 @@ export default function App() {
         throw new Error(`Load history failed: HTTP ${response.status}`);
       }
 
-      const payload = (await response.json()) as ApiDataResponse<Order[]>;
+      const payload = (await response.json()) as ApiDataResponse<AppOrder[]>;
       setHistoryOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
       setHistoryLoading(false);
@@ -406,7 +411,7 @@ export default function App() {
         throw new Error(`Load workbench orders failed: HTTP ${response.status}`);
       }
 
-      const payload = (await response.json()) as ApiDataResponse<Order[]>;
+      const payload = (await response.json()) as ApiDataResponse<AppOrder[]>;
       setWorkbenchOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
       setWorkbenchLoading(false);
@@ -1465,7 +1470,7 @@ export default function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({}),
+          body: JSON.stringify({ customerNote: customerNote.trim() }),
         },
       );
 
@@ -1482,6 +1487,7 @@ export default function App() {
       }
 
       resetCartState();
+      setCustomerNote("");
       setIsCartOpen(false);
       await loadOrderHistory();
       if (canViewOrderWorkbench) {
@@ -2182,6 +2188,9 @@ export default function App() {
                       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                         <div>
                           <h3 className="font-semibold">訂單 #{order.id}</h3>
+                          <p className="text-lg font-bold text-primary">
+                            {order.pickupCode}
+                          </p>
                           <p className="text-xs opacity-70">
                             建立時間：{formatVersionTime(order.createdAt)}
                           </p>
@@ -2204,6 +2213,10 @@ export default function App() {
                           </li>
                         ))}
                       </ul>
+
+                      <p className="mb-3 rounded bg-base-100 px-3 py-2 text-sm">
+                        備註：{order.customerNote || "無備註"}
+                      </p>
 
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="font-bold">總計 ${order.total}</span>
@@ -2620,6 +2633,9 @@ export default function App() {
                     className="card bg-base-100 shadow-sm border border-base-300"
                   >
                     <div className="card-body p-4">
+                      <p className="text-lg font-bold text-primary">
+                        {order.pickupCode}
+                      </p>
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <h3 className="font-semibold">訂單 #{order.id}</h3>
                         <span className={orderStatusBadgeClass(order.status)}>
@@ -2636,6 +2652,9 @@ export default function App() {
                           </li>
                         ))}
                       </ul>
+                      <p className="rounded bg-base-200 px-3 py-2 text-sm">
+                        備註：{order.customerNote || "無備註"}
+                      </p>
                       <p className="font-bold text-right">
                         總額 ${order.total}
                       </p>
@@ -2704,6 +2723,21 @@ export default function App() {
                 <span>總金額</span>
                 <span>${cartTotal}</span>
               </div>
+              <label className="form-control">
+                <span className="label-text text-sm">顧客備註</span>
+                <textarea
+                  className="textarea textarea-bordered min-h-20"
+                  maxLength={120}
+                  onChange={(event) => {
+                    setCustomerNote(event.target.value);
+                  }}
+                  placeholder="不要辣、餐點分袋、到店付款備註"
+                  value={customerNote}
+                />
+                <span className="label-text-alt text-right">
+                  {customerNote.length}/120
+                </span>
+              </label>
               <button
                 className="btn btn-error btn-outline w-full"
                 onClick={() => {
