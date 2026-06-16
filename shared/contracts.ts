@@ -29,6 +29,7 @@ export const orderStatusSchema = z.enum([
   "preparing",
   "ready",
   "completed",
+  "cancelled",
 ]);
 
 export const menuItemSchema = z.object({
@@ -76,6 +77,9 @@ export const orderSchema = z.object({
   total: z.number().min(0),
   status: orderStatusSchema,
   customerNote: z.string(),
+  cancelReason: z.string(),
+  cancelledBy: z.string().min(1).nullable().optional(),
+  cancelledAt: z.string().min(1).optional(),
   createdAt: z.string().min(1),
   submittedAt: z.string().min(1).optional(),
 });

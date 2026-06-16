@@ -145,6 +145,18 @@ export const updateOrderStatusBodySchema = z.object({
   status: z.enum(["preparing", "ready", "completed"]),
 });
 
+/** PATCH /api/orders/:id/cancel */
+export const cancelOrderParamsSchema = z.object({
+  id: z.string().regex(/^[0-9]+$/),
+});
+
+export const cancelOrderBodySchema = z
+  .object({
+    reason: z.string().trim().max(120).optional(),
+  })
+  .optional()
+  .default({});
+
 /** POST /api/users/me/role-request */
 export const createRoleRequestBodySchema = z.object({
   requestedRole: requestableRoleSchema,

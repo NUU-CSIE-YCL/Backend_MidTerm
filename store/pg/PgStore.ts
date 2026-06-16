@@ -4,6 +4,7 @@ import type {
   Order,
   OrderItem,
   OrderStatus,
+  Role,
 } from "../../shared/contracts.ts";
 import { db } from "../../db/client.ts";
 import {
@@ -41,6 +42,10 @@ interface SeedData {
     total: number;
     createdAt: string;
     submittedAt?: string;
+    customerNote?: string;
+    cancelReason?: string;
+    cancelledBy?: string | null;
+    cancelledAt?: string;
     items: Array<{ item: MenuItem; qty: number }>;
   }>;
 }
@@ -56,16 +61,33 @@ function normalizeOrderStatus(value: unknown): OrderStatus {
     status === "submitted" ||
     status === "preparing" ||
     status === "ready" ||
-    status === "completed"
+    status === "completed" ||
+    status === "cancelled"
   ) {
     return status;
   }
   return "pending";
 }
 
+function canCancelOrder(order: Order, actorUserId: string, actorRoles: readonly Role[]): boolean {
+  const canCancelOperationalOrder = actorRoles.some((role) =>
+    role === "staff" || role === "owner" || role === "admin",
+  );
+
+  if (canCancelOperationalOrder) {
+    return (
+      order.status === "submitted" ||
+      order.status === "preparing" ||
+      order.status === "ready"
+    );
+  }
+
+  return order.userId === actorUserId && order.status === "submitted";
+}
+
 function isValidWorkbenchTransition(
   currentStatus: OrderStatus,
-  nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+  nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
 ): boolean {
   return (
     (currentStatus === "submitted" && nextStatus === "preparing") ||
@@ -207,6 +229,13 @@ export class PgStore implements Store {
       total: inserted.total,
       status: "pending",
       customerNote: inserted.customerNote ?? "",
+      cancelReason: inserted.cancelReason ?? "",
+      cancelledBy: inserted.cancelledBy,
+      cancelledAt: inserted.cancelledAt
+        ? inserted.cancelledAt instanceof Date
+          ? inserted.cancelledAt.toISOString()
+          : new Date(inserted.cancelledAt).toISOString()
+        : undefined,
       createdAt:
         inserted.createdAt instanceof Date
           ? inserted.createdAt.toISOString()
@@ -352,7 +381,7 @@ export class PgStore implements Store {
 
   async updateOrderStatus(
     orderId: number,
-    nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+    nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -380,6 +409,55 @@ export class PgStore implements Store {
       .where(eq(ordersTable.id, orderId));
 
     order.status = nextStatus;
+    return { ok: true, order };
+  }
+
+  async cancelOrder(
+    orderId: number,
+    input: { actorUserId: string; actorRoles: readonly Role[]; reason?: string },
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_CANCEL_FORBIDDEN"
+          | "ORDER_STATUS_NOT_CANCELLABLE";
+      }
+  > {
+    const order = this.orders.find((o) => o.id === orderId);
+    if (!order) return { ok: false, code: "ORDER_NOT_FOUND" };
+
+    if (
+      order.status === "pending" ||
+      order.status === "completed" ||
+      order.status === "cancelled"
+    ) {
+      return { ok: false, code: "ORDER_STATUS_NOT_CANCELLABLE" };
+    }
+
+    if (!canCancelOrder(order, input.actorUserId, input.actorRoles)) {
+      return { ok: false, code: "ORDER_CANCEL_FORBIDDEN" };
+    }
+
+    const cancelledAt = new Date().toISOString();
+    const cancelReason = (input.reason ?? "").trim();
+
+    await db
+      .update(ordersTable)
+      .set({
+        status: "cancelled",
+        cancelReason,
+        cancelledBy: input.actorUserId,
+        cancelledAt: new Date(cancelledAt),
+      })
+      .where(eq(ordersTable.id, orderId));
+
+    order.status = "cancelled";
+    order.cancelReason = cancelReason;
+    order.cancelledBy = input.actorUserId;
+    order.cancelledAt = cancelledAt;
+
     return { ok: true, order };
   }
 
@@ -505,6 +583,13 @@ export class PgStore implements Store {
       total: row.total,
       status: normalizeOrderStatus(row.status),
       customerNote: row.customerNote ?? "",
+      cancelReason: row.cancelReason ?? "",
+      cancelledBy: row.cancelledBy,
+      cancelledAt: row.cancelledAt
+        ? row.cancelledAt instanceof Date
+          ? row.cancelledAt.toISOString()
+          : new Date(row.cancelledAt).toISOString()
+        : undefined,
       createdAt:
         row.createdAt instanceof Date
           ? row.createdAt.toISOString()

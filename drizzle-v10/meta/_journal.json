@@ -36,6 +36,13 @@
       "when": 1780862400000,
       "tag": "0004_v10_order_pickup_info",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780948800000,
+      "tag": "0005_v10_order_cancellation_info",
+      "breakpoints": true
     }
   ]
 }

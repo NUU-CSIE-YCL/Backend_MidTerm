@@ -65,6 +65,9 @@ export const ordersTable = appSchema.table("orders", {
   total: integer("total").notNull().default(0),
   status: text("status").notNull().default("pending"),
   customerNote: text("customer_note").notNull().default(""),
+  cancelReason: text("cancel_reason").notNull().default(""),
+  cancelledBy: text("cancelled_by").references(() => user.id),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
 });

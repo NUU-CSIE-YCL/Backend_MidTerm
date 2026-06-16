@@ -8,6 +8,8 @@ import {
   apiErrorResponseSchema,
   adminUserListResponseSchema,
   adminUserResponseSchema,
+  cancelOrderBodySchema,
+  cancelOrderParamsSchema,
   createMenuItemBodySchema,
   createRoleRequestBodySchema,
   currentUserResponseSchema,
@@ -72,6 +74,7 @@ const orderViewerRoles = [
 ] as const satisfies readonly Role[];
 const kitchenWorkflowRoles = ["chef", "owner", "admin"] as const satisfies readonly Role[];
 const counterWorkflowRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
+const orderCancellationRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
 
 // ─── Auth Helper ──────────────────────────────────────────────────────────────
 // 簡化的 helper 函數，用於保護路由並獲取 user，失敗時拋出 401 錯誤
@@ -1050,7 +1053,9 @@ app.patch(
     const user = await requireUserWithAnyRole(request, orderViewerRoles);
     const orderId = parseInt(params.id, 10);
     const nextStatus = (
-      body as { status: Exclude<OrderStatus, "pending" | "submitted"> }
+      body as {
+        status: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">;
+      }
     ).status;
 
     const canUseKitchenFlow =
@@ -1108,6 +1113,66 @@ app.patch(
 );
 
 // 更新訂單項目
+app.patch(
+  "/api/orders/:id/cancel",
+  async ({ params, body, request, set }) => {
+    const user = await requireUser(request);
+    const orderId = parseInt(params.id, 10);
+    const cancelBody = (body ?? {}) as { reason?: string };
+    const canCancelOperationalOrder = hasAnyRole(user, orderCancellationRoles);
+    const canAttemptCancellation =
+      canCancelOperationalOrder || user.roles.includes("customer");
+
+    if (!canAttemptCancellation) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+
+    const result = await store.cancelOrder(orderId, {
+      actorUserId: user.id,
+      actorRoles: user.roles,
+      reason: cancelBody.reason,
+    });
+
+    if (result.ok === true) {
+      return { data: toOrderResponse(result.order) };
+    }
+
+    switch (result.code) {
+      case "ORDER_NOT_FOUND":
+        set.status = 404;
+        return { error: "Order not found" };
+      case "ORDER_CANCEL_FORBIDDEN":
+        set.status = 403;
+        return { error: "Forbidden" };
+      case "ORDER_STATUS_NOT_CANCELLABLE":
+        set.status = 409;
+        return { error: "Order status cannot be cancelled" };
+      default:
+        set.status = 500;
+        return { error: "Unknown order cancel error" };
+    }
+  },
+  {
+    params: cancelOrderParamsSchema,
+    body: cancelOrderBodySchema,
+    detail: {
+      tags: ["orders"],
+      summary: "Cancel an order",
+      description:
+        "Cancel a submitted order by its customer, or an operational order by staff, owner, or admin.",
+    },
+    response: {
+      200: orderResponseEnvelopeSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
+      409: apiErrorResponseSchema,
+      500: apiErrorResponseSchema,
+    },
+  },
+);
+
 app.patch(
   "/api/orders/:id",
   async ({ params, body, request, set }) => {

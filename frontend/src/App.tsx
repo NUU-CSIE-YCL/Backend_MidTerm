@@ -35,6 +35,7 @@ const orderViewerRoles = [
 ] as const satisfies readonly Role[];
 const kitchenWorkflowRoles = ["chef", "owner", "admin"] as const satisfies readonly Role[];
 const counterWorkflowRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
+const orderCancellationRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
 const roleOptions = [
   "customer",
   "staff",
@@ -65,6 +66,7 @@ const orderStatusLabels: Record<OrderStatus, string> = {
   preparing: "製作中",
   ready: "等待取餐",
   completed: "已完成",
+  cancelled: "已取消",
 };
 const roleAuditActionLabels: Record<RoleAuditAction, string> = {
   role_request_approved: "申請核准",
@@ -150,6 +152,8 @@ function orderStatusBadgeClass(status: OrderStatus): string {
       return "badge badge-success";
     case "completed":
       return "badge badge-neutral";
+    case "cancelled":
+      return "badge badge-error";
     case "pending":
     default:
       return "badge badge-outline";
@@ -244,6 +248,7 @@ export default function App() {
   const [updatingWorkbenchOrderId, setUpdatingWorkbenchOrderId] = useState<
     number | null
   >(null);
+  const [cancelingOrderId, setCancelingOrderId] = useState<number | null>(null);
   const [cartQtyByItemId, setCartQtyByItemId] = useState<
     Record<string, number>
   >({});
@@ -1259,7 +1264,7 @@ export default function App() {
 
   async function advanceWorkbenchOrder(
     order: Order,
-    nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+    nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
   ): Promise<void> {
     setUpdatingWorkbenchOrderId(order.id);
     setWorkbenchError("");
@@ -1302,6 +1307,62 @@ export default function App() {
       console.error(updateError);
     } finally {
       setUpdatingWorkbenchOrderId(null);
+    }
+  }
+
+  async function cancelOrder(order: AppOrder): Promise<void> {
+    const confirmed = window.confirm(`確定要取消 ${order.pickupCode} 嗎？`);
+    if (!confirmed) return;
+
+    setCancelingOrderId(order.id);
+    setWorkbenchError("");
+    setActionError("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/orders/${order.id}/cancel`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({}),
+        },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再取消訂單。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有取消此訂單的權限。");
+      }
+
+      if (response.status === 409) {
+        throw new Error("此訂單狀態已無法取消，請重新整理後再試。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Cancel order failed: HTTP ${response.status}`);
+      }
+
+      await Promise.all([
+        loadOrderHistory(),
+        canViewOrderWorkbench ? loadWorkbenchOrders() : Promise.resolve(),
+      ]);
+    } catch (cancelError) {
+      const message =
+        cancelError instanceof Error
+          ? cancelError.message
+          : "取消訂單失敗，請稍後再試。";
+      if (canViewOrderWorkbench) {
+        setWorkbenchError(message);
+      } else {
+        setActionError(message);
+      }
+      console.error(cancelError);
+    } finally {
+      setCancelingOrderId(null);
     }
   }
 
@@ -2171,6 +2232,10 @@ export default function App() {
                     user && hasAnyRole(user, kitchenWorkflowRoles);
                   const canUseCounterFlow =
                     user && hasAnyRole(user, counterWorkflowRoles);
+                  const canCancelFromWorkbench =
+                    user &&
+                    hasAnyRole(user, orderCancellationRoles) &&
+                    ["submitted", "preparing", "ready"].includes(order.status);
                   const nextAction =
                     order.status === "submitted" && canUseKitchenFlow
                       ? { status: "preparing" as const, label: "開始製作" }
@@ -2218,31 +2283,57 @@ export default function App() {
                         備註：{order.customerNote || "無備註"}
                       </p>
 
+                      {order.status === "cancelled" ? (
+                        <p className="mb-3 rounded bg-error/10 px-3 py-2 text-sm">
+                          取消時間：{formatVersionTime(order.cancelledAt)}
+                          <br />
+                          取消原因：{order.cancelReason || "無取消原因"}
+                        </p>
+                      ) : null}
+
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="font-bold">總計 ${order.total}</span>
-                        {nextAction ? (
-                          <button
-                            className="btn btn-primary btn-sm"
-                            disabled={updatingWorkbenchOrderId === order.id}
-                            onClick={() => {
-                              void advanceWorkbenchOrder(
-                                order,
-                                nextAction.status,
-                              );
-                            }}
-                            type="button"
-                          >
-                            {updatingWorkbenchOrderId === order.id
-                              ? "更新中"
-                              : nextAction.label}
-                          </button>
-                        ) : (
-                          <span className="text-xs opacity-70">
-                            目前角色無下一步操作
-                          </span>
-                        )}
-                      </div>
-                    </article>
+                        <div className="flex flex-wrap gap-2">
+                          {canCancelFromWorkbench ? (
+                            <button
+                              className="btn btn-error btn-outline btn-sm"
+                              disabled={cancelingOrderId === order.id}
+                              onClick={() => {
+                                void cancelOrder(order);
+                              }}
+                              type="button"
+                            >
+                              {cancelingOrderId === order.id
+                                ? "取消中..."
+                                : "取消訂單"}
+                            </button>
+                          ) : null}
+                          {nextAction ? (
+                            <button
+                              className="btn btn-primary btn-sm"
+                              disabled={
+                                updatingWorkbenchOrderId === order.id ||
+                                cancelingOrderId === order.id
+                              }
+                              onClick={() => {
+                                void advanceWorkbenchOrder(
+                                  order,
+                                  nextAction.status,
+                                );
+                              }}
+                              type="button"
+                            >
+                              {updatingWorkbenchOrderId === order.id
+                                ? "更新中..."
+                                : nextAction.label}
+                            </button>
+                          ) : (
+                            <span className="text-xs opacity-70">
+                              目前角色無下一步操作
+                            </span>
+                          )}
+                        </div>
+                      </div>                    </article>
                   );
                 })}
               </div>
@@ -2655,7 +2746,27 @@ export default function App() {
                       <p className="rounded bg-base-200 px-3 py-2 text-sm">
                         備註：{order.customerNote || "無備註"}
                       </p>
-                      <p className="font-bold text-right">
+                      {order.status === "cancelled" ? (
+                        <p className="rounded bg-error/10 px-3 py-2 text-sm">
+                          取消時間：{formatVersionTime(order.cancelledAt)}
+                          <br />
+                          取消原因：{order.cancelReason || "無取消原因"}
+                        </p>
+                      ) : null}
+                      {order.status === "submitted" ? (
+                        <button
+                          className="btn btn-error btn-outline btn-sm self-end"
+                          disabled={cancelingOrderId === order.id}
+                          onClick={() => {
+                            void cancelOrder(order);
+                          }}
+                          type="button"
+                        >
+                          {cancelingOrderId === order.id
+                            ? "取消中..."
+                            : "取消訂單"}
+                        </button>
+                      ) : null}                      <p className="font-bold text-right">
                         總額 ${order.total}
                       </p>
                     </div>

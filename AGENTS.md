@@ -56,21 +56,30 @@
   - `PATCH /api/orders/:id/status`
   - `chef/owner/admin` 可處理 `submitted -> preparing -> ready`
   - `staff/owner/admin` 可處理 `ready -> completed`
-  - 前端新增「訂單工作台」區塊
-  - 顧客歷史訂單顯示真實狀態
+
+- `V10.4B 取餐資訊與顧客備註`
+  - `drizzle-v10/0004_v10_order_pickup_info.sql`
+  - `orders.customer_note text not null default ''`
+  - `Order.customerNote`
+  - `OrderResponse.pickupCode`，由 `order.id` 推導，例如 `A-0007`
+  - 顧客送出訂單時可填寫備註
+  - 工作台與顧客歷史訂單顯示取餐編號與備註
   - 使用者已回報 Render 驗證成功
 
 ### 本輪正在實作，待 Render 驗證
 
-- `V10.4B 取餐資訊與顧客備註`
-  - 新增 migration：`drizzle-v10/0004_v10_order_pickup_info.sql`
-  - `orders.customer_note text not null default ''`
-  - `Order.customerNote`
-  - `OrderResponse.pickupCode`，由 `order.id` 推導，例如 `A-0007`
-  - `POST /api/orders/:id/submit` 接受可選 `{ customerNote?: string }`
-  - 顧客送出訂單時可填寫備註，最多 120 字
-  - 工作台與顧客歷史訂單顯示取餐編號與備註
-  - 本輪不做付款、取消、退款、重開訂單、WebSocket 即時推播
+- `V10.4C 訂單取消流程`
+  - 新增 `cancelled` 訂單狀態
+  - 新增 migration：`drizzle-v10/0005_v10_order_cancellation_info.sql`
+  - `orders.cancel_reason text not null default ''`
+  - `orders.cancelled_by text null references user(id)`
+  - `orders.cancelled_at timestamp with time zone null`
+  - 新增 `PATCH /api/orders/:id/cancel`
+  - customer 只能取消自己的 `submitted` 訂單
+  - `staff/owner/admin` 可取消 `submitted/preparing/ready` 訂單
+  - `pending/completed/cancelled` 不可取消
+  - chef 不負責取消訂單
+  - 前端在歷史訂單與工作台顯示取消操作與取消資訊
 
 ## 重要檔案
 
@@ -83,19 +92,19 @@
 - JSON store：`store/json/JsonFileStore.ts`
 - Frontend：`frontend/src/App.tsx`
 - V10 migrations：`drizzle-v10/`
-- Tests：`tests/v10-menu-versioning.test.ts`、`tests/v10-rbac.test.ts`、`tests/v10-role-requests.test.ts`、`tests/v10-admin-users.test.ts`、`tests/v10-role-audit-logs.test.ts`、`tests/v10-order-workbench.test.ts`、`tests/v10-order-pickup-info.test.ts`
+- Tests：`tests/v10-menu-versioning.test.ts`、`tests/v10-rbac.test.ts`、`tests/v10-role-requests.test.ts`、`tests/v10-admin-users.test.ts`、`tests/v10-role-audit-logs.test.ts`、`tests/v10-order-workbench.test.ts`、`tests/v10-order-pickup-info.test.ts`、`tests/v10-order-cancellation.test.ts`
 - 報告：`報告.md`
 
 Legacy `drizzle/` 是 V8/V9 migration，不要拿來當 V10 migration 來源。
 
 ## 本機驗證命令
 
-V10.4B 本輪完成後建議跑：
+V10.4C 本輪完成後建議跑：
 
 ```bash
 bun test
 bun run build
-bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts tests/v10-order-pickup-info.test.ts
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts tests/v10-order-pickup-info.test.ts tests/v10-order-cancellation.test.ts
 git diff --check
 ```
 
@@ -103,14 +112,14 @@ git diff --check
 
 ## Render 驗證清單
 
-V10.4B push 後請使用者在線上確認：
+V10.4C push 後請使用者在線上確認：
 
-- Render migration log 出現 `0004_v10_order_pickup_info`
-- customer 填寫備註並送出訂單
-- customer 在「我的訂單歷史」看到取餐編號與備註
-- chef/staff 在「訂單工作台」看到同一筆訂單的取餐編號與備註
-- chef/staff 完成 V10.4A 狀態流轉後，備註與取餐編號仍保留
-- 未填備註時，訂單顯示「無備註」或空備註狀態
+- migration log 出現 `0005_v10_order_cancellation_info`
+- customer 送出訂單後，可在「我的訂單歷史」取消 `submitted` 訂單
+- customer 無法取消已進入 `preparing/ready/completed` 的訂單
+- staff 可在工作台取消 `submitted/preparing/ready` 訂單
+- chef 看不到取消操作，或呼叫取消 API 回 `403`
+- 取消後訂單顯示「已取消」，且不再出現下一步製作/完成按鈕
 
 ## Render/Neon 注意事項
 
@@ -126,13 +135,13 @@ Render env 至少需要：
 - `RBAC_ADMIN_EMAILS=<你的 Google email>`
 - 視部署方式設定 `API_ALLOWED_ORIGIN`
 
-V10.4B 新增 migration。因為專案 migration runner 會依 journal 重跑 migration，`0004_v10_order_pickup_info.sql` 必須保持 idempotent。
+V10.4C 新增 migration。因為專案 migration runner 會依 journal 重跑 migration，`0005_v10_order_cancellation_info.sql` 必須保持 idempotent。
 
 ## 尚未做的後續項目
 
-- V10.4B Render 線上驗證紀錄更新
+- V10.4C Render 線上驗證紀錄更新
 - 訂單付款
-- 訂單取消、退款、重開訂單
+- 訂單退款、重開訂單
 - WebSocket 即時推播
 - audit log 匯出/搜尋
 - admin 使用者搜尋/分頁
@@ -145,5 +154,5 @@ V10.4B 新增 migration。因為專案 migration runner 會依 journal 重跑 mi
 
 1. 先讀本檔與 `報告.md`。
 2. 跑 `git status --short`。
-3. 若接續 V10.4B，優先看 `shared/contracts.ts`、`shared/route-schemas.ts`、`db/schema.ts`、`store/Store.ts`、`store/pg/PgStore.ts`、`store/json/JsonFileStore.ts`、`backend.ts`、`frontend/src/App.tsx`。
+3. 若接續 V10.4C，優先看 `shared/contracts.ts`、`shared/route-schemas.ts`、`db/schema.ts`、`store/Store.ts`、`store/pg/PgStore.ts`、`store/json/JsonFileStore.ts`、`backend.ts`、`frontend/src/App.tsx`。
 4. 先完成本機 test/build/tsc/diff，再交給使用者做 Render 線上驗證。

@@ -1,4 +1,4 @@
-import type { MenuItem, Order, OrderStatus } from "../shared/contracts.ts";
+import type { MenuItem, Order, OrderStatus, Role } from "../shared/contracts.ts";
 
 export type UpdateOrderItemErrorCode =
   | "ORDER_NOT_FOUND"
@@ -18,6 +18,11 @@ export type UpdateOrderStatusErrorCode =
   | "ORDER_NOT_FOUND"
   | "ORDER_STATUS_NOT_EDITABLE"
   | "INVALID_ORDER_STATUS_TRANSITION";
+
+export type CancelOrderErrorCode =
+  | "ORDER_NOT_FOUND"
+  | "ORDER_CANCEL_FORBIDDEN"
+  | "ORDER_STATUS_NOT_CANCELLABLE";
 
 export interface Store {
   init(): Promise<void>;
@@ -70,9 +75,19 @@ export interface Store {
   >;
   updateOrderStatus(
     orderId: number,
-    nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+    nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
   ): Promise<
     | { ok: true; order: Order }
     | { ok: false; code: UpdateOrderStatusErrorCode }
+  >;
+  cancelOrder(
+    orderId: number,
+    input: {
+      actorUserId: string;
+      actorRoles: readonly Role[];
+      reason?: string;
+    },
+  ): Promise<
+    { ok: true; order: Order } | { ok: false; code: CancelOrderErrorCode }
   >;
 }

@@ -13,11 +13,11 @@ describe("V10.4A order workbench contracts", () => {
       "preparing",
       "ready",
       "completed",
+      "cancelled",
     ]) {
       expect(orderStatusSchema.safeParse(status).success).toBe(true);
     }
 
-    expect(orderStatusSchema.safeParse("cancelled").success).toBe(false);
     expect(orderStatusSchema.safeParse("paid").success).toBe(false);
   });
 
@@ -43,6 +43,7 @@ describe("V10.4A order workbench contracts", () => {
       items: [],
       total: 0,
       customerNote: "",
+      cancelReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
     };
 
@@ -68,6 +69,7 @@ describe("V10.4A order workbench contracts", () => {
       total: 120,
       status: "ready",
       customerNote: "",
+      cancelReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       createdAtTaipei: "2026/06/16 08:00",
       pickupCode: "A-0002",

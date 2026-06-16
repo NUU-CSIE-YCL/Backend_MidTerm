@@ -4,6 +4,7 @@ import type {
   Order,
   OrderItem,
   OrderStatus,
+  Role,
 } from "../../shared/contracts.ts";
 import type { Store } from "../Store.ts";
 
@@ -51,16 +52,33 @@ function normalizeOrderStatus(value: unknown): OrderStatus {
     status === "submitted" ||
     status === "preparing" ||
     status === "ready" ||
-    status === "completed"
+    status === "completed" ||
+    status === "cancelled"
   ) {
     return status;
   }
   return "pending";
 }
 
+function canCancelOrder(order: Order, actorUserId: string, actorRoles: readonly Role[]): boolean {
+  const canCancelOperationalOrder = actorRoles.some((role) =>
+    role === "staff" || role === "owner" || role === "admin",
+  );
+
+  if (canCancelOperationalOrder) {
+    return (
+      order.status === "submitted" ||
+      order.status === "preparing" ||
+      order.status === "ready"
+    );
+  }
+
+  return order.userId === actorUserId && order.status === "submitted";
+}
+
 function isValidWorkbenchTransition(
   currentStatus: OrderStatus,
-  nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+  nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
 ): boolean {
   return (
     (currentStatus === "submitted" && nextStatus === "preparing") ||
@@ -232,6 +250,12 @@ export class JsonFileStore implements Store {
           userId: normalizeUserId(order.userId ?? fallbackUserId),
           customerNote:
             typeof order.customerNote === "string" ? order.customerNote : "",
+          cancelReason:
+            typeof order.cancelReason === "string" ? order.cancelReason : "",
+          cancelledBy:
+            typeof order.cancelledBy === "string" ? order.cancelledBy : null,
+          cancelledAt:
+            typeof order.cancelledAt === "string" ? order.cancelledAt : undefined,
           items: order.items.map((orderItem) => ({
             ...orderItem,
             item: normalizeMenuItem(orderItem.item),
@@ -405,6 +429,8 @@ export class JsonFileStore implements Store {
       total: 0,
       status: "pending",
       customerNote: "",
+      cancelReason: "",
+      cancelledBy: null,
       createdAt: new Date().toISOString(),
     };
 
@@ -534,7 +560,7 @@ export class JsonFileStore implements Store {
 
   async updateOrderStatus(
     orderId: number,
-    nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+    nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -559,6 +585,45 @@ export class JsonFileStore implements Store {
     }
 
     order.status = nextStatus;
+    await this.persist();
+
+    return { ok: true, order };
+  }
+
+  async cancelOrder(
+    orderId: number,
+    input: { actorUserId: string; actorRoles: readonly Role[]; reason?: string },
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_CANCEL_FORBIDDEN"
+          | "ORDER_STATUS_NOT_CANCELLABLE";
+      }
+  > {
+    const order = this.orders.find((targetOrder) => targetOrder.id === orderId);
+    if (!order) {
+      return { ok: false, code: "ORDER_NOT_FOUND" };
+    }
+
+    if (
+      order.status === "pending" ||
+      order.status === "completed" ||
+      order.status === "cancelled"
+    ) {
+      return { ok: false, code: "ORDER_STATUS_NOT_CANCELLABLE" };
+    }
+
+    if (!canCancelOrder(order, input.actorUserId, input.actorRoles)) {
+      return { ok: false, code: "ORDER_CANCEL_FORBIDDEN" };
+    }
+
+    order.status = "cancelled";
+    order.cancelReason = (input.reason ?? "").trim();
+    order.cancelledBy = input.actorUserId;
+    order.cancelledAt = new Date().toISOString();
     await this.persist();
 
     return { ok: true, order };
