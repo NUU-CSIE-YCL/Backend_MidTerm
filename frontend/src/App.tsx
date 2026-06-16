@@ -11,6 +11,7 @@ import type {
   ApiDataResponse,
   MenuItem,
   Order,
+  OrderStatus,
   RequestableRole,
   Role,
   RoleAuditAction,
@@ -26,6 +27,14 @@ const fallbackImageUrl =
   "https://images.unsplash.com/photo-1526318896980-cf78c088247c?auto=format&fit=crop&w=800&q=80";
 const menuManagerRoles = ["owner", "admin"] as const satisfies readonly Role[];
 const adminRoles = ["admin"] as const satisfies readonly Role[];
+const orderViewerRoles = [
+  "staff",
+  "chef",
+  "owner",
+  "admin",
+] as const satisfies readonly Role[];
+const kitchenWorkflowRoles = ["chef", "owner", "admin"] as const satisfies readonly Role[];
+const counterWorkflowRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
 const roleOptions = [
   "customer",
   "staff",
@@ -49,6 +58,13 @@ const roleRequestStatusLabels: Record<RoleRequestStatus, string> = {
   pending: "待審核",
   approved: "已核准",
   rejected: "已拒絕",
+};
+const orderStatusLabels: Record<OrderStatus, string> = {
+  pending: "購物車",
+  submitted: "等待處理",
+  preparing: "製作中",
+  ready: "等待取餐",
+  completed: "已完成",
 };
 const roleAuditActionLabels: Record<RoleAuditAction, string> = {
   role_request_approved: "申請核准",
@@ -117,6 +133,22 @@ function roleRequestStatusBadgeClass(status: RoleRequestStatus): string {
     case "pending":
     default:
       return "badge badge-warning";
+  }
+}
+
+function orderStatusBadgeClass(status: OrderStatus): string {
+  switch (status) {
+    case "submitted":
+      return "badge badge-info";
+    case "preparing":
+      return "badge badge-warning";
+    case "ready":
+      return "badge badge-success";
+    case "completed":
+      return "badge badge-neutral";
+    case "pending":
+    default:
+      return "badge badge-outline";
   }
 }
 
@@ -202,6 +234,12 @@ export default function App() {
   const [orderId, setOrderId] = useState<number | null>(null);
   const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [workbenchOrders, setWorkbenchOrders] = useState<Order[]>([]);
+  const [workbenchLoading, setWorkbenchLoading] = useState(false);
+  const [workbenchError, setWorkbenchError] = useState("");
+  const [updatingWorkbenchOrderId, setUpdatingWorkbenchOrderId] = useState<
+    number | null
+  >(null);
   const [cartQtyByItemId, setCartQtyByItemId] = useState<
     Record<string, number>
   >({});
@@ -343,6 +381,35 @@ export default function App() {
       setHistoryOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
       setHistoryLoading(false);
+    }
+  }
+
+  async function loadWorkbenchOrders(): Promise<void> {
+    if (!user || !hasAnyRole(user, orderViewerRoles)) return;
+
+    setWorkbenchLoading(true);
+    try {
+      const response = await fetch(buildApiUrl("/api/orders/workbench"), {
+        credentials: "include",
+      });
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再查看訂單工作台。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有查看訂單工作台的權限。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Load workbench orders failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<Order[]>;
+      setWorkbenchOrders(Array.isArray(payload?.data) ? payload.data : []);
+    } finally {
+      setWorkbenchLoading(false);
     }
   }
 
@@ -561,6 +628,7 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setHistoryOrders([]);
+      setWorkbenchOrders([]);
       setMyRoleRequests([]);
       setAdminRoleRequests([]);
       setAdminUsers([]);
@@ -573,6 +641,7 @@ export default function App() {
       setAdminUsersMessage("");
       setAdminUsersError("");
       setRoleAuditLogsError("");
+      setWorkbenchError("");
       setIsCartOpen(false);
       resetCartState();
       return;
@@ -587,6 +656,13 @@ export default function App() {
       setRoleRequestError("載入角色申請資料失敗，請稍後再試。");
       console.error(roleRequestLoadError);
     });
+
+    if (hasAnyRole(user, orderViewerRoles)) {
+      void loadWorkbenchOrders().catch((workbenchLoadError) => {
+        setWorkbenchError("載入訂單工作台失敗，請稍後再試。");
+        console.error(workbenchLoadError);
+      });
+    }
 
     if (hasAnyRole(user, adminRoles)) {
       void loadAdminRoleRequests().catch((adminLoadError) => {
@@ -627,6 +703,7 @@ export default function App() {
   const canManageMenu = user ? hasAnyRole(user, menuManagerRoles) : false;
   const canReviewRoleRequests = user ? hasAnyRole(user, adminRoles) : false;
   const canManageUsers = user ? hasAnyRole(user, adminRoles) : false;
+  const canViewOrderWorkbench = user ? hasAnyRole(user, orderViewerRoles) : false;
   const availableRequestRoles = user
     ? requestableRoles.filter((role) => !user.roles.includes(role))
     : [];
@@ -1175,6 +1252,54 @@ export default function App() {
     }
   }
 
+  async function advanceWorkbenchOrder(
+    order: Order,
+    nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+  ): Promise<void> {
+    setUpdatingWorkbenchOrderId(order.id);
+    setWorkbenchError("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/orders/${order.id}/status`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ status: nextStatus }),
+        },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再更新訂單狀態。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有更新此訂單狀態的權限。");
+      }
+
+      if (response.status === 409) {
+        throw new Error("訂單狀態已變更，請重新整理後再試。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Update order status failed: HTTP ${response.status}`);
+      }
+
+      await Promise.all([loadWorkbenchOrders(), loadOrderHistory()]);
+    } catch (updateError) {
+      setWorkbenchError(
+        updateError instanceof Error
+          ? updateError.message
+          : "更新訂單狀態失敗，請稍後再試。",
+      );
+      console.error(updateError);
+    } finally {
+      setUpdatingWorkbenchOrderId(null);
+    }
+  }
+
   async function addToCart(item: MenuItem): Promise<void> {
     setActionError("");
     setActiveItemId(item.id);
@@ -1359,6 +1484,9 @@ export default function App() {
       resetCartState();
       setIsCartOpen(false);
       await loadOrderHistory();
+      if (canViewOrderWorkbench) {
+        await loadWorkbenchOrders();
+      }
     } catch (submitError) {
       setActionError("送出訂單失敗，請稍後再試。");
       console.error(submitError);
@@ -1995,6 +2123,120 @@ export default function App() {
           </section>
         ) : null}
 
+        {canViewOrderWorkbench ? (
+          <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">訂單工作台</h2>
+                <p className="text-sm opacity-70">
+                  staff/chef/owner/admin 可依角色處理已送出的訂單。
+                </p>
+              </div>
+              <button
+                className="btn btn-sm btn-outline"
+                disabled={workbenchLoading}
+                onClick={() => {
+                  void loadWorkbenchOrders();
+                }}
+                type="button"
+              >
+                {workbenchLoading ? "讀取中" : "重新整理"}
+              </button>
+            </div>
+
+            {workbenchError ? (
+              <div className="alert alert-error mb-3 py-2">
+                <span>{workbenchError}</span>
+              </div>
+            ) : null}
+
+            {workbenchLoading ? (
+              <div className="alert py-2">
+                <span>讀取中...</span>
+              </div>
+            ) : workbenchOrders.length === 0 ? (
+              <div className="alert alert-info py-2">
+                <span>目前沒有待處理訂單。</span>
+              </div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {workbenchOrders.map((order) => {
+                  const canUseKitchenFlow =
+                    user && hasAnyRole(user, kitchenWorkflowRoles);
+                  const canUseCounterFlow =
+                    user && hasAnyRole(user, counterWorkflowRoles);
+                  const nextAction =
+                    order.status === "submitted" && canUseKitchenFlow
+                      ? { status: "preparing" as const, label: "開始製作" }
+                      : order.status === "preparing" && canUseKitchenFlow
+                        ? { status: "ready" as const, label: "餐點完成" }
+                        : order.status === "ready" && canUseCounterFlow
+                          ? { status: "completed" as const, label: "完成取餐" }
+                          : null;
+
+                  return (
+                    <article
+                      className="rounded border border-base-300 bg-base-200 p-4"
+                      key={order.id}
+                    >
+                      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h3 className="font-semibold">訂單 #{order.id}</h3>
+                          <p className="text-xs opacity-70">
+                            建立時間：{formatVersionTime(order.createdAt)}
+                          </p>
+                        </div>
+                        <span className={orderStatusBadgeClass(order.status)}>
+                          {orderStatusLabels[order.status]}
+                        </span>
+                      </div>
+
+                      <ul className="mb-3 space-y-1 text-sm">
+                        {order.items.map((detail) => (
+                          <li
+                            className="flex justify-between gap-2"
+                            key={`${order.id}-${detail.item.id}`}
+                          >
+                            <span>
+                              {detail.item.name} x {detail.qty}
+                            </span>
+                            <span>${detail.item.price * detail.qty}</span>
+                          </li>
+                        ))}
+                      </ul>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-bold">總計 ${order.total}</span>
+                        {nextAction ? (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            disabled={updatingWorkbenchOrderId === order.id}
+                            onClick={() => {
+                              void advanceWorkbenchOrder(
+                                order,
+                                nextAction.status,
+                              );
+                            }}
+                            type="button"
+                          >
+                            {updatingWorkbenchOrderId === order.id
+                              ? "更新中"
+                              : nextAction.label}
+                          </button>
+                        ) : (
+                          <span className="text-xs opacity-70">
+                            目前角色無下一步操作
+                          </span>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : null}
+
         {canManageMenu ? (
           <section className="mb-8 rounded-lg border border-base-300 bg-base-100 shadow-sm">
             <div className="border-b border-base-300 p-4">
@@ -2380,7 +2622,9 @@ export default function App() {
                     <div className="card-body p-4">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <h3 className="font-semibold">訂單 #{order.id}</h3>
-                        <span className="badge badge-success">已送出</span>
+                        <span className={orderStatusBadgeClass(order.status)}>
+                          {orderStatusLabels[order.status]}
+                        </span>
                       </div>
                       <p className="text-sm opacity-70">
                         建立時間：{order.createdAt}

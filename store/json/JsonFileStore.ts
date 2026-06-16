@@ -1,5 +1,10 @@
 import { mkdir, rename } from "node:fs/promises";
-import type { MenuItem, Order, OrderItem } from "../../shared/contracts.ts";
+import type {
+  MenuItem,
+  Order,
+  OrderItem,
+  OrderStatus,
+} from "../../shared/contracts.ts";
 import type { Store } from "../Store.ts";
 
 interface StoredUser {
@@ -37,6 +42,31 @@ function calculateOrderTotal(items: OrderItem[]): number {
   return items.reduce((sum, orderItem) => {
     return sum + orderItem.item.price * orderItem.qty;
   }, 0);
+}
+
+function normalizeOrderStatus(value: unknown): OrderStatus {
+  const status = String(value);
+  if (
+    status === "pending" ||
+    status === "submitted" ||
+    status === "preparing" ||
+    status === "ready" ||
+    status === "completed"
+  ) {
+    return status;
+  }
+  return "pending";
+}
+
+function isValidWorkbenchTransition(
+  currentStatus: OrderStatus,
+  nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+): boolean {
+  return (
+    (currentStatus === "submitted" && nextStatus === "preparing") ||
+    (currentStatus === "preparing" && nextStatus === "ready") ||
+    (currentStatus === "ready" && nextStatus === "completed")
+  );
 }
 
 function createInitialMenuItem(
@@ -204,9 +234,11 @@ export class JsonFileStore implements Store {
             ...orderItem,
             item: normalizeMenuItem(orderItem.item),
           })),
-          status: order.status === "submitted" ? "submitted" : "pending",
+          status: normalizeOrderStatus(order.status),
           submittedAt:
-            order.status === "submitted" ? order.submittedAt : undefined,
+            normalizeOrderStatus(order.status) !== "pending"
+              ? order.submittedAt
+              : undefined,
         })),
         userIdCounter: parsed.userIdCounter ?? 0,
         menuIdCounter: parsed.menuIdCounter ?? 0,
@@ -327,6 +359,12 @@ export class JsonFileStore implements Store {
     return this.orders;
   }
 
+  getWorkbenchOrders(): ReadonlyArray<Order> {
+    return this.orders
+      .filter((order) => order.status !== "pending")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   getCurrentOrderByUserId(userId: string): Order | undefined {
     const pendingOrders = this.orders.filter(
       (order) => order.userId === userId && order.status === "pending",
@@ -344,9 +382,7 @@ export class JsonFileStore implements Store {
 
   getOrderHistoryByUserId(userId: string): ReadonlyArray<Order> {
     return this.orders
-      .filter(
-        (order) => order.userId === userId && order.status === "submitted",
-      )
+      .filter((order) => order.userId === userId && order.status !== "pending")
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -487,6 +523,38 @@ export class JsonFileStore implements Store {
 
     order.status = "submitted";
     order.submittedAt = new Date().toISOString();
+    await this.persist();
+
+    return { ok: true, order };
+  }
+
+  async updateOrderStatus(
+    orderId: number,
+    nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_STATUS_NOT_EDITABLE"
+          | "INVALID_ORDER_STATUS_TRANSITION";
+      }
+  > {
+    const order = this.orders.find((targetOrder) => targetOrder.id === orderId);
+    if (!order) {
+      return { ok: false, code: "ORDER_NOT_FOUND" };
+    }
+
+    if (order.status === "pending" || order.status === "completed") {
+      return { ok: false, code: "ORDER_STATUS_NOT_EDITABLE" };
+    }
+
+    if (!isValidWorkbenchTransition(order.status, nextStatus)) {
+      return { ok: false, code: "INVALID_ORDER_STATUS_TRANSITION" };
+    }
+
+    order.status = nextStatus;
     await this.persist();
 
     return { ok: true, order };

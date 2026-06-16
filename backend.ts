@@ -36,15 +36,18 @@ import {
   updateMenuItemParamsSchema,
   updateOrderBodySchema,
   updateOrderParamsSchema,
+  updateOrderStatusBodySchema,
+  updateOrderStatusParamsSchema,
 } from "./shared/route-schemas.ts";
 import { createStore } from "./store/index.ts";
 import { auth, getCurrentUser } from "./auth/better-auth.ts";
 import { db } from "./db/client.ts";
 import { user as authUsersTable } from "./db/auth-schema.ts";
 import { roleAuditLogsTable, roleRequestsTable } from "./db/schema.ts";
-import { normalizeRoles, requireAnyRole } from "./shared/guards.ts";
+import { hasAnyRole, normalizeRoles, requireAnyRole } from "./shared/guards.ts";
 import type {
   AdminUser,
+  OrderStatus,
   Role,
   RoleAuditAction,
   RoleAuditLog,
@@ -66,6 +69,8 @@ const orderViewerRoles = [
   "owner",
   "admin",
 ] as const satisfies readonly Role[];
+const kitchenWorkflowRoles = ["chef", "owner", "admin"] as const satisfies readonly Role[];
+const counterWorkflowRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
 
 // ─── Auth Helper ──────────────────────────────────────────────────────────────
 // 簡化的 helper 函數，用於保護路由並獲取 user，失敗時拋出 401 錯誤
@@ -904,6 +909,30 @@ app.get(
   },
 );
 
+app.get(
+  "/api/orders/workbench",
+  async ({ request }) => {
+    await requireUserWithAnyRole(request, orderViewerRoles);
+
+    return {
+      data: store.getWorkbenchOrders().map(toOrderResponse),
+    };
+  },
+  {
+    detail: {
+      tags: ["orders"],
+      summary: "List workbench orders",
+      description:
+        "Return non-pending orders for staff, chef, owner, and admin workbench users.",
+    },
+    response: {
+      200: orderListResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
 // 取得使用者目前進行中的訂單
 app.get(
   "/api/orders/current",
@@ -1010,6 +1039,69 @@ app.get(
       401: apiErrorResponseSchema,
       403: apiErrorResponseSchema,
       404: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.patch(
+  "/api/orders/:id/status",
+  async ({ params, body, request, set }) => {
+    const user = await requireUserWithAnyRole(request, orderViewerRoles);
+    const orderId = parseInt(params.id, 10);
+    const nextStatus = (
+      body as { status: Exclude<OrderStatus, "pending" | "submitted"> }
+    ).status;
+
+    const canUseKitchenFlow =
+      nextStatus === "preparing" || nextStatus === "ready";
+    const allowedForStatus = canUseKitchenFlow
+      ? hasAnyRole(user, kitchenWorkflowRoles)
+      : hasAnyRole(user, counterWorkflowRoles);
+
+    if (!allowedForStatus) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+
+    const result = await store.updateOrderStatus(orderId, nextStatus);
+    if (result.ok === true) {
+      return { data: toOrderResponse(result.order) };
+    }
+
+    if (result.ok === false) {
+      switch (result.code) {
+        case "ORDER_NOT_FOUND":
+          set.status = 404;
+          return { error: "Order not found" };
+        case "ORDER_STATUS_NOT_EDITABLE":
+        case "INVALID_ORDER_STATUS_TRANSITION":
+          set.status = 409;
+          return { error: result.code };
+        default:
+          set.status = 500;
+          return { error: "Unknown order status error" };
+      }
+    }
+
+    set.status = 500;
+    return { error: "Unknown order status error" };
+  },
+  {
+    params: updateOrderStatusParamsSchema,
+    body: updateOrderStatusBodySchema,
+    detail: {
+      tags: ["orders"],
+      summary: "Advance order workbench status",
+      description:
+        "Advance a submitted order through preparing, ready, and completed states.",
+    },
+    response: {
+      200: orderResponseEnvelopeSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
+      409: apiErrorResponseSchema,
+      500: apiErrorResponseSchema,
     },
   },
 );

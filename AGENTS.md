@@ -15,7 +15,6 @@
 ### 已完成且使用者回報 Render 驗證成功
 
 - `V10.1 基礎版本化`
-  - `PG_SCHEMA=bf_v10`
   - 菜單品項使用版本 ID，例如 `001-01`、`001-02`
   - 訂單引用特定 `menu_items.id`
   - 舊版菜單不可加入購物車，舊購物車送出會回 `409`
@@ -23,64 +22,65 @@
 - `V10.2 菜單管理與版本展示`
   - 登入後可新增、編輯、下架菜單
   - `GET /api/menu/:id/history`
-  - 菜單卡片顯示 logical id、版本 badge、近期更新提示
   - 圖片 URL 預覽與載入失敗提示已修正
 
 - `V10.3A RBAC 基礎`
   - `user.roles text[] not null default ARRAY['customer']`
   - `RBAC_ADMIN_EMAILS` 自動授予初始 admin
-  - `GET /api/users/me`
   - 菜單 mutation 需要 `owner/admin`
   - `GET /api/orders` 需要 `staff/chef/owner/admin`
 
 - `V10.3B 角色申請與 Admin 審核`
   - 使用者可申請 `staff/chef`
   - admin 可核准或拒絕申請
-  - 核准後角色會合併進目標使用者 roles，並保留 `customer`
-
-### 已本機完成，待使用者 Render 驗證
 
 - `V10.3C Admin 使用者角色管理`
   - `GET /api/admin/users`
   - `PATCH /api/admin/users/:userId/roles`
   - admin 可直接分配或移除使用者 roles
-  - 後端永遠保留 `customer`
   - 禁止 admin 移除自己的 `admin` role
-  - 前端新增 admin-only「使用者角色管理」卡片
 
 - `V10.3D RBAC 審計紀錄`
-  - 新增 `role_audit_logs` table
-  - 新增 migration：`drizzle-v10/0003_v10_role_audit_logs.sql`
-  - 新增 `GET /api/admin/role-audit-logs`
-  - admin 核准/拒絕角色申請會寫入 audit log
-  - admin 直接更新使用者 roles 會寫入 audit log
-  - 前端新增 admin-only「角色異動紀錄」卡片
-  - `RBAC_ADMIN_EMAILS` 自動授予 admin 暫不追溯記錄
+  - `role_audit_logs` table
+  - `GET /api/admin/role-audit-logs`
+  - 角色申請審核與 admin 直接改 roles 都會留下紀錄
+
+### 已本機完成，待使用者 Render 驗證
+
+- `V10.4A 店員/廚房訂單工作台`
+  - 訂單狀態擴充為 `pending | submitted | preparing | ready | completed`
+  - 新增 `GET /api/orders/workbench`
+  - 新增 `PATCH /api/orders/:id/status`
+  - `chef/owner/admin` 可處理 `submitted -> preparing -> ready`
+  - `staff/owner/admin` 可處理 `ready -> completed`
+  - 前端新增「訂單工作台」區塊
+  - 顧客歷史訂單顯示真實狀態
+  - 不新增 migration，因為 `orders.status` 已是 text
 
 ## 重要檔案
 
 - Backend/API：`backend.ts`
-- Auth schema：`db/auth-schema.ts`
 - App schema：`db/schema.ts`
 - Contracts：`shared/contracts.ts`
 - Route schemas：`shared/route-schemas.ts`
-- RBAC guards：`shared/guards.ts`
+- Store 介面：`store/Store.ts`
+- PostgreSQL store：`store/pg/PgStore.ts`
+- JSON store：`store/json/JsonFileStore.ts`
 - Frontend：`frontend/src/App.tsx`
 - V10 migrations：`drizzle-v10/`
-- Render startup：`scripts/start.ts`
-- Tests：`tests/v10-menu-versioning.test.ts`、`tests/v10-rbac.test.ts`、`tests/v10-role-requests.test.ts`、`tests/v10-admin-users.test.ts`、`tests/v10-role-audit-logs.test.ts`
+- Tests：`tests/v10-menu-versioning.test.ts`、`tests/v10-rbac.test.ts`、`tests/v10-role-requests.test.ts`、`tests/v10-admin-users.test.ts`、`tests/v10-role-audit-logs.test.ts`、`tests/v10-order-workbench.test.ts`
 - 報告：`報告.md`
 
 Legacy `drizzle/` 是 V8/V9 migration，不要拿來當 V10 migration 來源。
 
 ## 本機驗證命令
 
-V10.3D 本輪完成後建議跑：
+V10.4A 本輪完成後建議跑：
 
 ```bash
 bun test
 bun run build
-bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts
 git diff --check
 ```
 
@@ -88,14 +88,16 @@ git diff --check
 
 ## Render 驗證清單
 
-V10.3D push 後請使用者在線上確認：
+V10.4A push 後請使用者在線上確認：
 
-- Render migration log 出現 `0003_v10_role_audit_logs`
-- admin 登入後看到「角色異動紀錄」區塊
-- admin 核准一筆 staff/chef 申請後，審計紀錄出現「申請核准」
-- admin 拒絕一筆申請後，審計紀錄出現「申請拒絕」
-- admin 直接修改一般使用者 roles 後，審計紀錄出現「直接更新」
-- 非 admin 使用者看不到審計紀錄區塊，也無法呼叫 `/api/admin/role-audit-logs`
+- 顧客送出訂單後，staff/chef/owner/admin 可在「訂單工作台」看到該訂單
+- chef 可將 `submitted` 改為 `preparing`
+- chef 可將 `preparing` 改為 `ready`
+- staff 可將 `ready` 改為 `completed`
+- 顧客重新整理後，在「我的訂單歷史」看到狀態變化
+- customer 帳號看不到「訂單工作台」
+- staff 不可把 `submitted` 改成 `preparing`
+- chef 不可把 `ready` 改成 `completed`
 
 ## Render/Neon 注意事項
 
@@ -111,15 +113,16 @@ Render env 至少需要：
 - `RBAC_ADMIN_EMAILS=<你的 Google email>`
 - 視部署方式設定 `API_ALLOWED_ORIGIN`
 
-V10.3D 有新 migration。涉及 Neon schema/data 的改動比前端更需要保守，push 前請確認 `drizzle-v10/0003_v10_role_audit_logs.sql` 不含 legacy schema 或危險 drop。
+V10.4A 不新增 migration。若 Render log 有 migration 訊息，應是既有 migration already applied 或正常略過。
 
 ## 尚未做的後續項目
 
-- V10.3C/V10.3D Render 線上驗證紀錄更新
+- V10.4A Render 線上驗證紀錄更新
+- 訂單付款、桌號、叫號、取餐通知
+- 訂單取消、退款、重開訂單
+- WebSocket 即時推播
+- audit log 分頁/匯出
 - admin 使用者搜尋/分頁
-- audit log 匯出
-- audit log 分頁
-- 店員/廚房專用訂單工作台
 - display order
 - major/minor version
 - A/B testing
@@ -129,5 +132,5 @@ V10.3D 有新 migration。涉及 Neon schema/data 的改動比前端更需要保
 
 1. 先讀本檔與 `報告.md`。
 2. 跑 `git status --short`。
-3. 若接續 V10.3D，優先看 `db/schema.ts`、`backend.ts`、`frontend/src/App.tsx`、`shared/contracts.ts`、`shared/route-schemas.ts`、`tests/v10-role-audit-logs.test.ts`。
+3. 若接續 V10.4A，優先看 `shared/contracts.ts`、`store/Store.ts`、`store/pg/PgStore.ts`、`store/json/JsonFileStore.ts`、`backend.ts`、`frontend/src/App.tsx`。
 4. 先完成本機 test/build/tsc/diff，再交給使用者做 Render 線上驗證。

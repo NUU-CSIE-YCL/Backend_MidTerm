@@ -1,5 +1,10 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import type { MenuItem, Order, OrderItem } from "../../shared/contracts.ts";
+import type {
+  MenuItem,
+  Order,
+  OrderItem,
+  OrderStatus,
+} from "../../shared/contracts.ts";
 import { db } from "../../db/client.ts";
 import {
   menuRepository,
@@ -32,7 +37,7 @@ interface SeedData {
   orders?: Array<{
     id: number;
     userId: string | number;
-    status: "pending" | "submitted";
+    status: OrderStatus;
     total: number;
     createdAt: string;
     submittedAt?: string;
@@ -42,6 +47,31 @@ interface SeedData {
 
 function calculateTotal(items: ReadonlyArray<OrderItem>): number {
   return items.reduce((sum, oi) => sum + oi.item.price * oi.qty, 0);
+}
+
+function normalizeOrderStatus(value: unknown): OrderStatus {
+  const status = String(value);
+  if (
+    status === "pending" ||
+    status === "submitted" ||
+    status === "preparing" ||
+    status === "ready" ||
+    status === "completed"
+  ) {
+    return status;
+  }
+  return "pending";
+}
+
+function isValidWorkbenchTransition(
+  currentStatus: OrderStatus,
+  nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+): boolean {
+  return (
+    (currentStatus === "submitted" && nextStatus === "preparing") ||
+    (currentStatus === "preparing" && nextStatus === "ready") ||
+    (currentStatus === "ready" && nextStatus === "completed")
+  );
 }
 
 export class PgStore implements Store {
@@ -126,6 +156,12 @@ export class PgStore implements Store {
     return this.orders;
   }
 
+  getWorkbenchOrders(): ReadonlyArray<Order> {
+    return this.orders
+      .filter((o) => o.status !== "pending")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   getCurrentOrderByUserId(userId: string): Order | undefined {
     const pendingOrders = this.orders.filter(
       (o) => o.userId === userId && o.status === "pending",
@@ -141,7 +177,7 @@ export class PgStore implements Store {
 
   getOrderHistoryByUserId(userId: string): ReadonlyArray<Order> {
     return this.orders
-      .filter((o) => o.userId === userId && o.status === "submitted")
+      .filter((o) => o.userId === userId && o.status !== "pending")
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -307,6 +343,39 @@ export class PgStore implements Store {
 
   // ── Private ─────────────────────────────────────────────────
 
+  async updateOrderStatus(
+    orderId: number,
+    nextStatus: Exclude<OrderStatus, "pending" | "submitted">,
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_STATUS_NOT_EDITABLE"
+          | "INVALID_ORDER_STATUS_TRANSITION";
+      }
+  > {
+    const order = this.orders.find((o) => o.id === orderId);
+    if (!order) return { ok: false, code: "ORDER_NOT_FOUND" };
+
+    if (order.status === "pending" || order.status === "completed") {
+      return { ok: false, code: "ORDER_STATUS_NOT_EDITABLE" };
+    }
+
+    if (!isValidWorkbenchTransition(order.status, nextStatus)) {
+      return { ok: false, code: "INVALID_ORDER_STATUS_TRANSITION" };
+    }
+
+    await db
+      .update(ordersTable)
+      .set({ status: nextStatus })
+      .where(eq(ordersTable.id, orderId));
+
+    order.status = nextStatus;
+    return { ok: true, order };
+  }
+
   private async seedFromJsonIfEmpty(): Promise<void> {
     const [countRow] = await db
       .select({ value: sql<number>`count(*)` })
@@ -427,7 +496,7 @@ export class PgStore implements Store {
       userId: row.userId,
       items: itemsByOrderId.get(row.id) ?? [],
       total: row.total,
-      status: row.status === "submitted" ? "submitted" : "pending",
+      status: normalizeOrderStatus(row.status),
       createdAt:
         row.createdAt instanceof Date
           ? row.createdAt.toISOString()

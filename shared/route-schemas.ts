@@ -127,6 +127,15 @@ export const submitOrderParamsSchema = z.object({
   id: z.string().regex(/^[0-9]+$/),
 });
 
+/** PATCH /api/orders/:id/status */
+export const updateOrderStatusParamsSchema = z.object({
+  id: z.string().regex(/^[0-9]+$/),
+});
+
+export const updateOrderStatusBodySchema = z.object({
+  status: z.enum(["preparing", "ready", "completed"]),
+});
+
 /** POST /api/users/me/role-request */
 export const createRoleRequestBodySchema = z.object({
   requestedRole: requestableRoleSchema,

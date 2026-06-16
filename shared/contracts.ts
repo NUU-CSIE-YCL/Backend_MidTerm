@@ -23,6 +23,14 @@ export const roleAuditActionSchema = z.enum([
   "admin_roles_updated",
 ]);
 
+export const orderStatusSchema = z.enum([
+  "pending",
+  "submitted",
+  "preparing",
+  "ready",
+  "completed",
+]);
+
 export const menuItemSchema = z.object({
   id: z.string().min(1),
   entityId: z.string().min(1),
@@ -66,7 +74,7 @@ export const orderSchema = z.object({
   userId: z.string().min(1),
   items: z.array(orderItemSchema),
   total: z.number().min(0),
-  status: z.enum(["pending", "submitted"]),
+  status: orderStatusSchema,
   createdAt: z.string().min(1),
   submittedAt: z.string().min(1).optional(),
 });
@@ -106,6 +114,7 @@ export type Role = z.infer<typeof roleSchema>;
 export type RequestableRole = z.infer<typeof requestableRoleSchema>;
 export type RoleRequestStatus = z.infer<typeof roleRequestStatusSchema>;
 export type RoleAuditAction = z.infer<typeof roleAuditActionSchema>;
+export type OrderStatus = z.infer<typeof orderStatusSchema>;
 export type MenuItem = z.infer<typeof menuItemSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
