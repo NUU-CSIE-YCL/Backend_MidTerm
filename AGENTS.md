@@ -156,3 +156,45 @@ V10.4C 新增 migration。因為專案 migration runner 會依 journal 重跑 mi
 2. 跑 `git status --short`。
 3. 若接續 V10.4C，優先看 `shared/contracts.ts`、`shared/route-schemas.ts`、`db/schema.ts`、`store/Store.ts`、`store/pg/PgStore.ts`、`store/json/JsonFileStore.ts`、`backend.ts`、`frontend/src/App.tsx`。
 4. 先完成本機 test/build/tsc/diff，再交給使用者做 Render 線上驗證。
+
+## V10.4D 交接更新
+
+- 使用者已回報 `V10.4C 訂單取消流程` Render 驗證成功。
+- 使用者已回報「購物車舊版/已下架品項仍可看見並清空」小修正 Render 驗證成功。
+- 本輪正在實作 `V10.4D 到店付款狀態`。
+
+### V10.4D 範圍
+
+- 新增 migration：`drizzle-v10/0006_v10_order_payment_status.sql`
+- `orders` 新增：
+  - `payment_status text not null default 'unpaid'`
+  - `paid_by text null references user(id)`
+  - `paid_at timestamp with time zone null`
+- `Order` / `OrderResponse` 新增：
+  - `paymentStatus`
+  - `paidBy`
+  - `paidAt`
+- 新訂單預設 `unpaid`。
+- customer 送出訂單後仍是 `unpaid`。
+- `chef/owner/admin` 將訂單推進到 `ready` 時不改付款狀態。
+- `staff/owner/admin` 執行 `ready -> completed` 時同步設為 `paid`，並記錄 `paidBy`、`paidAt`。
+- `cancelled` 訂單不可付款；取消流程不新增付款狀態變更。
+- 不新增獨立 payment endpoint，付款只透過完成取餐流程發生。
+
+### V10.4D 本機驗證命令
+
+```bash
+bun test
+bun run build
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts tests/v10-order-pickup-info.test.ts tests/v10-order-cancellation.test.ts tests/v10-order-payment.test.ts
+git diff --check
+```
+
+### V10.4D Render 驗證清單
+
+- migration log 出現 `0006_v10_order_payment_status`。
+- customer 送出訂單後，在歷史訂單看到 `未付款`。
+- chef 推進到 `ready` 後仍是 `未付款`。
+- staff 點「完成取餐並收款」後，訂單變成 `completed` 且顯示 `已付款`。
+- customer 重新整理後，在歷史訂單看到 `已付款`。
+- cancelled 訂單不會顯示收款操作。

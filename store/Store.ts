@@ -76,6 +76,7 @@ export interface Store {
   updateOrderStatus(
     orderId: number,
     nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
+    input: { actorUserId: string },
   ): Promise<
     | { ok: true; order: Order }
     | { ok: false; code: UpdateOrderStatusErrorCode }

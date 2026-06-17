@@ -4,6 +4,7 @@ import type {
   Order,
   OrderItem,
   OrderStatus,
+  PaymentStatus,
   Role,
 } from "../../shared/contracts.ts";
 import type { Store } from "../Store.ts";
@@ -58,6 +59,10 @@ function normalizeOrderStatus(value: unknown): OrderStatus {
     return status;
   }
   return "pending";
+}
+
+function normalizePaymentStatus(value: unknown): PaymentStatus {
+  return value === "paid" ? "paid" : "unpaid";
 }
 
 function canCancelOrder(order: Order, actorUserId: string, actorRoles: readonly Role[]): boolean {
@@ -250,6 +255,11 @@ export class JsonFileStore implements Store {
           userId: normalizeUserId(order.userId ?? fallbackUserId),
           customerNote:
             typeof order.customerNote === "string" ? order.customerNote : "",
+          paymentStatus: normalizePaymentStatus(order.paymentStatus),
+          paidBy:
+            typeof order.paidBy === "string" ? order.paidBy : null,
+          paidAt:
+            typeof order.paidAt === "string" ? order.paidAt : undefined,
           cancelReason:
             typeof order.cancelReason === "string" ? order.cancelReason : "",
           cancelledBy:
@@ -428,6 +438,8 @@ export class JsonFileStore implements Store {
       items: [],
       total: 0,
       status: "pending",
+      paymentStatus: "unpaid",
+      paidBy: null,
       customerNote: "",
       cancelReason: "",
       cancelledBy: null,
@@ -561,6 +573,7 @@ export class JsonFileStore implements Store {
   async updateOrderStatus(
     orderId: number,
     nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
+    input: { actorUserId: string },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -585,6 +598,11 @@ export class JsonFileStore implements Store {
     }
 
     order.status = nextStatus;
+    if (nextStatus === "completed") {
+      order.paymentStatus = "paid";
+      order.paidBy = input.actorUserId;
+      order.paidAt = new Date().toISOString();
+    }
     await this.persist();
 
     return { ok: true, order };

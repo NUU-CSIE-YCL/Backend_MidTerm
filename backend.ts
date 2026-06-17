@@ -1069,7 +1069,9 @@ app.patch(
       return { error: "Forbidden" };
     }
 
-    const result = await store.updateOrderStatus(orderId, nextStatus);
+    const result = await store.updateOrderStatus(orderId, nextStatus, {
+      actorUserId: user.id,
+    });
     if (result.ok === true) {
       return { data: toOrderResponse(result.order) };
     }

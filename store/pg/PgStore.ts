@@ -4,6 +4,7 @@ import type {
   Order,
   OrderItem,
   OrderStatus,
+  PaymentStatus,
   Role,
 } from "../../shared/contracts.ts";
 import { db } from "../../db/client.ts";
@@ -43,6 +44,9 @@ interface SeedData {
     createdAt: string;
     submittedAt?: string;
     customerNote?: string;
+    paymentStatus?: PaymentStatus;
+    paidBy?: string | null;
+    paidAt?: string;
     cancelReason?: string;
     cancelledBy?: string | null;
     cancelledAt?: string;
@@ -67,6 +71,10 @@ function normalizeOrderStatus(value: unknown): OrderStatus {
     return status;
   }
   return "pending";
+}
+
+function normalizePaymentStatus(value: unknown): PaymentStatus {
+  return value === "paid" ? "paid" : "unpaid";
 }
 
 function canCancelOrder(order: Order, actorUserId: string, actorRoles: readonly Role[]): boolean {
@@ -228,6 +236,13 @@ export class PgStore implements Store {
       items: [],
       total: inserted.total,
       status: "pending",
+      paymentStatus: normalizePaymentStatus(inserted.paymentStatus),
+      paidBy: inserted.paidBy,
+      paidAt: inserted.paidAt
+        ? inserted.paidAt instanceof Date
+          ? inserted.paidAt.toISOString()
+          : new Date(inserted.paidAt).toISOString()
+        : undefined,
       customerNote: inserted.customerNote ?? "",
       cancelReason: inserted.cancelReason ?? "",
       cancelledBy: inserted.cancelledBy,
@@ -382,6 +397,7 @@ export class PgStore implements Store {
   async updateOrderStatus(
     orderId: number,
     nextStatus: Exclude<OrderStatus, "pending" | "submitted" | "cancelled">,
+    input: { actorUserId: string },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -403,12 +419,28 @@ export class PgStore implements Store {
       return { ok: false, code: "INVALID_ORDER_STATUS_TRANSITION" };
     }
 
+    const paidAt = nextStatus === "completed" ? new Date().toISOString() : undefined;
+    const patch =
+      nextStatus === "completed"
+        ? {
+            status: nextStatus,
+            paymentStatus: "paid" as const,
+            paidBy: input.actorUserId,
+            paidAt: new Date(paidAt!),
+          }
+        : { status: nextStatus };
+
     await db
       .update(ordersTable)
-      .set({ status: nextStatus })
+      .set(patch)
       .where(eq(ordersTable.id, orderId));
 
     order.status = nextStatus;
+    if (nextStatus === "completed") {
+      order.paymentStatus = "paid";
+      order.paidBy = input.actorUserId;
+      order.paidAt = paidAt;
+    }
     return { ok: true, order };
   }
 
@@ -582,6 +614,13 @@ export class PgStore implements Store {
       items: itemsByOrderId.get(row.id) ?? [],
       total: row.total,
       status: normalizeOrderStatus(row.status),
+      paymentStatus: normalizePaymentStatus(row.paymentStatus),
+      paidBy: row.paidBy,
+      paidAt: row.paidAt
+        ? row.paidAt instanceof Date
+          ? row.paidAt.toISOString()
+          : new Date(row.paidAt).toISOString()
+        : undefined,
       customerNote: row.customerNote ?? "",
       cancelReason: row.cancelReason ?? "",
       cancelledBy: row.cancelledBy,

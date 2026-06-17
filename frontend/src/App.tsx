@@ -12,6 +12,7 @@ import type {
   MenuItem,
   Order,
   OrderStatus,
+  PaymentStatus,
   RequestableRole,
   Role,
   RoleAuditAction,
@@ -67,6 +68,10 @@ const orderStatusLabels: Record<OrderStatus, string> = {
   ready: "等待取餐",
   completed: "已完成",
   cancelled: "已取消",
+};
+const paymentStatusLabels: Record<PaymentStatus, string> = {
+  unpaid: "未付款",
+  paid: "已付款",
 };
 const roleAuditActionLabels: Record<RoleAuditAction, string> = {
   role_request_approved: "申請核准",
@@ -158,6 +163,10 @@ function orderStatusBadgeClass(status: OrderStatus): string {
     default:
       return "badge badge-outline";
   }
+}
+
+function paymentStatusBadgeClass(status: PaymentStatus): string {
+  return status === "paid" ? "badge badge-success" : "badge badge-warning";
 }
 
 function MenuImage({
@@ -2265,7 +2274,7 @@ export default function App() {
                       : order.status === "preparing" && canUseKitchenFlow
                         ? { status: "ready" as const, label: "餐點完成" }
                         : order.status === "ready" && canUseCounterFlow
-                          ? { status: "completed" as const, label: "完成取餐" }
+                          ? { status: "completed" as const, label: "完成取餐並收款" }
                           : null;
 
                   return (
@@ -2283,9 +2292,14 @@ export default function App() {
                             建立時間：{formatVersionTime(order.createdAt)}
                           </p>
                         </div>
-                        <span className={orderStatusBadgeClass(order.status)}>
-                          {orderStatusLabels[order.status]}
-                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          <span className={orderStatusBadgeClass(order.status)}>
+                            {orderStatusLabels[order.status]}
+                          </span>
+                          <span className={paymentStatusBadgeClass(order.paymentStatus)}>
+                            {paymentStatusLabels[order.paymentStatus]}
+                          </span>
+                        </div>
                       </div>
 
                       <ul className="mb-3 space-y-1 text-sm">
@@ -2311,6 +2325,14 @@ export default function App() {
                           取消時間：{formatVersionTime(order.cancelledAt)}
                           <br />
                           取消原因：{order.cancelReason || "無取消原因"}
+                        </p>
+                      ) : null}
+
+                      {order.paymentStatus === "paid" ? (
+                        <p className="mb-3 rounded bg-success/10 px-3 py-2 text-sm">
+                          收款時間：{formatVersionTime(order.paidAt)}
+                          <br />
+                          收款者：{order.paidBy ?? "未知"}
                         </p>
                       ) : null}
 
@@ -2752,9 +2774,14 @@ export default function App() {
                       </p>
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <h3 className="font-semibold">訂單 #{order.id}</h3>
-                        <span className={orderStatusBadgeClass(order.status)}>
-                          {orderStatusLabels[order.status]}
-                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          <span className={orderStatusBadgeClass(order.status)}>
+                            {orderStatusLabels[order.status]}
+                          </span>
+                          <span className={paymentStatusBadgeClass(order.paymentStatus)}>
+                            {paymentStatusLabels[order.paymentStatus]}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-sm opacity-70">
                         建立時間：{order.createdAt}
@@ -2774,6 +2801,13 @@ export default function App() {
                           取消時間：{formatVersionTime(order.cancelledAt)}
                           <br />
                           取消原因：{order.cancelReason || "無取消原因"}
+                        </p>
+                      ) : null}
+                      {order.paymentStatus === "paid" ? (
+                        <p className="rounded bg-success/10 px-3 py-2 text-sm">
+                          收款時間：{formatVersionTime(order.paidAt)}
+                          <br />
+                          收款者：{order.paidBy ?? "未知"}
                         </p>
                       ) : null}
                       {order.status === "submitted" ? (

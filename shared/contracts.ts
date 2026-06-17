@@ -32,6 +32,8 @@ export const orderStatusSchema = z.enum([
   "cancelled",
 ]);
 
+export const paymentStatusSchema = z.enum(["unpaid", "paid"]);
+
 export const menuItemSchema = z.object({
   id: z.string().min(1),
   entityId: z.string().min(1),
@@ -76,6 +78,9 @@ export const orderSchema = z.object({
   items: z.array(orderItemSchema),
   total: z.number().min(0),
   status: orderStatusSchema,
+  paymentStatus: paymentStatusSchema,
+  paidBy: z.string().min(1).nullable().optional(),
+  paidAt: z.string().min(1).optional(),
   customerNote: z.string(),
   cancelReason: z.string(),
   cancelledBy: z.string().min(1).nullable().optional(),
@@ -120,6 +125,7 @@ export type RequestableRole = z.infer<typeof requestableRoleSchema>;
 export type RoleRequestStatus = z.infer<typeof roleRequestStatusSchema>;
 export type RoleAuditAction = z.infer<typeof roleAuditActionSchema>;
 export type OrderStatus = z.infer<typeof orderStatusSchema>;
+export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
 export type MenuItem = z.infer<typeof menuItemSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
