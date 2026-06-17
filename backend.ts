@@ -35,6 +35,7 @@ import {
   roleAuditLogListResponseSchema,
   refundOrderBodySchema,
   refundOrderParamsSchema,
+  reorderMenuBodySchema,
   reopenOrderBodySchema,
   reopenOrderParamsSchema,
   submitOrderBodySchema,
@@ -898,6 +899,37 @@ app.post(
     },
     response: {
       201: menuItemResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.patch(
+  "/api/menu/reorder",
+  async ({ body, request, set }) => {
+    await requireUserWithAnyRole(request, menuManagerRoles);
+    const result = await store.reorderMenu(
+      (body as { items: Array<{ id: string; displayOrder: number }> }).items,
+    );
+
+    if (!result) {
+      set.status = 400;
+      return { error: "Invalid menu reorder payload" };
+    }
+
+    return { data: [...result] };
+  },
+  {
+    body: reorderMenuBodySchema,
+    detail: {
+      tags: ["menu"],
+      summary: "Reorder menu items",
+      description: "Update display order for current menu item versions.",
+    },
+    response: {
+      200: menuListResponseSchema,
+      400: apiErrorResponseSchema,
       401: apiErrorResponseSchema,
       403: apiErrorResponseSchema,
     },

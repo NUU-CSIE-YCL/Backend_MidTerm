@@ -316,6 +316,7 @@ export default function App() {
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [isSavingMenu, setIsSavingMenu] = useState(false);
   const [retiringMenuId, setRetiringMenuId] = useState<string | null>(null);
+  const [reorderingMenuId, setReorderingMenuId] = useState<string | null>(null);
   const [menuAdminMessage, setMenuAdminMessage] = useState("");
   const [menuAdminError, setMenuAdminError] = useState("");
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(
@@ -1239,6 +1240,61 @@ export default function App() {
       console.error(retireError);
     } finally {
       setRetiringMenuId(null);
+    }
+  }
+
+  async function reorderMenuItem(item: MenuItem, direction: "up" | "down"): Promise<void> {
+    const currentIndex = items.findIndex((target) => target.id === item.id);
+    const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= items.length) return;
+
+    const nextItems = [...items];
+    const [movingItem] = nextItems.splice(currentIndex, 1);
+    if (!movingItem) return;
+    nextItems.splice(nextIndex, 0, movingItem);
+
+    setReorderingMenuId(item.id);
+    setMenuAdminError("");
+    setMenuAdminMessage("");
+
+    try {
+      const response = await fetch(buildApiUrl("/api/menu/reorder"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          items: nextItems.map((target, index) => ({
+            id: target.id,
+            displayOrder: index + 1,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setUser(null);
+          throw new Error("請重新登入後再調整菜單排序。");
+        }
+
+        if (response.status === 403) {
+          throw new Error("目前角色沒有調整菜單排序權限。");
+        }
+
+        throw new Error(`Reorder menu failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<MenuItem[]>;
+      setItems(Array.isArray(payload?.data) ? payload.data : []);
+      setMenuAdminMessage(`${item.name} 排序已更新`);
+    } catch (reorderError) {
+      setMenuAdminError(
+        reorderError instanceof Error
+          ? reorderError.message
+          : "調整菜單排序失敗，請稍後再試。",
+      );
+      console.error(reorderError);
+    } finally {
+      setReorderingMenuId(null);
     }
   }
 
@@ -3102,6 +3158,7 @@ export default function App() {
                 <table className="table table-sm">
                   <thead>
                     <tr>
+                      <th>排序</th>
                       <th>品項</th>
                       <th>版本</th>
                       <th>價格</th>
@@ -3117,6 +3174,41 @@ export default function App() {
                       return (
                         <Fragment key={item.id}>
                           <tr>
+                            <td>
+                              <div className="flex flex-col gap-1">
+                                <span className="text-xs opacity-70">
+                                  #{item.displayOrder}
+                                </span>
+                                <div className="join">
+                                  <button
+                                    className="btn btn-xs join-item"
+                                    disabled={
+                                      reorderingMenuId !== null ||
+                                      items.indexOf(item) === 0
+                                    }
+                                    onClick={() => {
+                                      void reorderMenuItem(item, "up");
+                                    }}
+                                    type="button"
+                                  >
+                                    上移
+                                  </button>
+                                  <button
+                                    className="btn btn-xs join-item"
+                                    disabled={
+                                      reorderingMenuId !== null ||
+                                      items.indexOf(item) === items.length - 1
+                                    }
+                                    onClick={() => {
+                                      void reorderMenuItem(item, "down");
+                                    }}
+                                    type="button"
+                                  >
+                                    下移
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
                             <td>
                               <div className="font-semibold">{item.name}</div>
                               <div className="text-xs opacity-70">
@@ -3182,7 +3274,7 @@ export default function App() {
                           </tr>
                           {isExpanded ? (
                             <tr>
-                              <td colSpan={5}>
+                              <td colSpan={6}>
                                 {versions.length === 0 ? (
                                   <div className="text-sm opacity-70">
                                     尚無版本歷史資料。

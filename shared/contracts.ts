@@ -46,6 +46,7 @@ export const menuItemSchema = z.object({
   category: z.string().min(1),
   description: z.string(),
   image_url: z.string().min(1),
+  displayOrder: z.number().int().min(0),
   isCurrentVersion: z.boolean(),
   supersedes: z.string().min(1).nullable().optional(),
   changeReason: z.string().nullable().optional(),

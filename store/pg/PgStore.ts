@@ -139,10 +139,12 @@ export class PgStore implements Store {
     category: string;
     description: string;
     image_url: string;
+    display_order?: number;
     change_reason?: string;
   }): Promise<MenuItem> {
     const created = await menuRepository.createMenuItem(input, "system");
     this.menu.push(created);
+    this.sortMenu();
     return created;
   }
 
@@ -167,6 +169,7 @@ export class PgStore implements Store {
     const idx = this.menu.findIndex((item) => item.logicalId === next.logicalId);
     if (idx !== -1) this.menu[idx] = next;
     else this.menu.push(next);
+    this.sortMenu();
 
     return next;
   }
@@ -181,6 +184,17 @@ export class PgStore implements Store {
     if (idx !== -1) this.menu.splice(idx, 1);
 
     return removedItem;
+  }
+
+  async reorderMenu(
+    items: Array<{ id: string; displayOrder: number }>,
+  ): Promise<ReadonlyArray<MenuItem> | null> {
+    const nextMenu = await menuRepository.reorderCurrentMenu(items);
+    if (!nextMenu) return null;
+
+    this.menu = [...nextMenu];
+    this.sortMenu();
+    return this.menu;
   }
 
   async getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>> {
@@ -633,6 +647,7 @@ export class PgStore implements Store {
             category: item.category,
             description: item.description,
             imageUrl: item.image_url,
+            displayOrder: index + 1,
             isCurrentVersion: true,
             changeReason: "Initial seed",
             createdBy: "system",
@@ -650,7 +665,7 @@ export class PgStore implements Store {
       .select()
       .from(menuItemsTable)
       .where(eq(menuItemsTable.isCurrentVersion, true))
-      .orderBy(asc(menuItemsTable.id));
+      .orderBy(asc(menuItemsTable.displayOrder), asc(menuItemsTable.id));
 
     const orderRows = await db
       .select()
@@ -672,6 +687,7 @@ export class PgStore implements Store {
         category: menuItemsTable.category,
         description: menuItemsTable.description,
         imageUrl: menuItemsTable.imageUrl,
+        displayOrder: menuItemsTable.displayOrder,
         isCurrentVersion: menuItemsTable.isCurrentVersion,
         supersedes: menuItemsTable.supersedes,
         changeReason: menuItemsTable.changeReason,
@@ -701,6 +717,7 @@ export class PgStore implements Store {
           category: row.category,
           description: row.description,
           image_url: row.imageUrl,
+          displayOrder: row.displayOrder,
           isCurrentVersion: row.isCurrentVersion,
           supersedes: row.supersedes,
           changeReason: row.changeReason,
@@ -753,5 +770,12 @@ export class PgStore implements Store {
           : new Date(row.submittedAt).toISOString()
         : undefined,
     }));
+    this.sortMenu();
+  }
+
+  private sortMenu(): void {
+    this.menu.sort(
+      (a, b) => a.displayOrder - b.displayOrder || a.id.localeCompare(b.id),
+    );
   }
 }

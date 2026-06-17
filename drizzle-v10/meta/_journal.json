@@ -57,6 +57,13 @@
       "when": 1781121600000,
       "tag": "0007_v10_refund_reopen_info",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781208000000,
+      "tag": "0008_v10_menu_display_order",
+      "breakpoints": true
     }
   ]
 }

@@ -108,6 +108,7 @@ export const createMenuItemBodySchema = z.object({
   category: z.string().min(1),
   description: z.string().min(1),
   image_url: z.string().min(1),
+  display_order: z.number().int().min(0).optional(),
   change_reason: z.string().min(1).optional(),
 });
 
@@ -128,6 +129,18 @@ export const updateMenuItemBodySchema = z.object({
 /** DELETE /api/menu/:id */
 export const deleteMenuItemParamsSchema = z.object({
   id: z.string().min(1),
+});
+
+/** PATCH /api/menu/reorder */
+export const reorderMenuBodySchema = z.object({
+  items: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        displayOrder: z.number().int().min(0),
+      }),
+    )
+    .min(1),
 });
 
 /** GET /api/menu/:id/history */

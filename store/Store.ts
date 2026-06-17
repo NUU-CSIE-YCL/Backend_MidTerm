@@ -45,6 +45,7 @@ export interface Store {
     category: string;
     description: string;
     image_url: string;
+    display_order?: number;
     change_reason?: string;
   }): Promise<MenuItem>;
   updateMenuItem(
@@ -59,6 +60,9 @@ export interface Store {
     },
   ): Promise<MenuItem | null>;
   deleteMenuItem(menuId: string): Promise<MenuItem | null>;
+  reorderMenu(
+    items: Array<{ id: string; displayOrder: number }>,
+  ): Promise<ReadonlyArray<MenuItem> | null>;
   getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>>;
 
   getOrders(): ReadonlyArray<Order>;

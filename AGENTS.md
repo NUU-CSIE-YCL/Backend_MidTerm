@@ -1,5 +1,27 @@
 # AGENTS.md
 
+## 最新交接補充：V10.5A 菜單顯示排序
+
+- 使用者已回報 `V10.4H 營運摘要看板` Render 驗證成功。
+- 本輪實作 `V10.5A 菜單顯示排序`：
+  - 新增 migration：`drizzle-v10/0008_v10_menu_display_order.sql`
+  - `menu_items` 新增 `display_order integer not null default 0`
+  - `MenuItem` 新增 `displayOrder`
+  - `GET /api/menu` 依 `displayOrder asc, id asc` 回傳
+  - `POST /api/menu` 可選 `display_order`
+  - `PATCH /api/menu/:id` 建立新版時保留原排序
+  - 新增 `PATCH /api/menu/reorder`，需要 `owner/admin`
+  - 前端菜單管理表格新增排序值與「上移 / 下移」
+- 新增根目錄文件：`接下來可能的任務清單.md`
+  - 只供人類閱讀與 session 交接
+  - 不做網站 UI、不做 API、不做 DB
+- 本輪測試需包含：`tests/v10-menu-display-order.test.ts`
+- Render 驗證重點：
+  - migration log 出現 `0008_v10_menu_display_order`
+  - owner/admin 可調整排序
+  - customer 看不到排序控制，但公開菜單順序會變
+  - 編輯菜單建立新版後排序位置不變
+
 ## 最新交接補充：V10.4H 營運摘要看板
 
 - 使用者已回報 `V10.4G 退款與取消訂單重開` Render 驗證成功。

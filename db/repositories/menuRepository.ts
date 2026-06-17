@@ -13,6 +13,7 @@ export interface CreateVersionedMenuItemInput {
   category: string;
   description: string;
   image_url: string;
+  display_order?: number;
   change_reason?: string;
 }
 
@@ -36,6 +37,7 @@ export function toMenuItem(row: MenuRow): MenuItem {
     category: row.category,
     description: row.description,
     image_url: row.imageUrl,
+    displayOrder: row.displayOrder,
     isCurrentVersion: row.isCurrentVersion,
     supersedes: row.supersedes,
     changeReason: row.changeReason,
@@ -61,7 +63,7 @@ export class MenuRepository {
       .select()
       .from(menuItemsTable)
       .where(eq(menuItemsTable.isCurrentVersion, true))
-      .orderBy(asc(menuItemsTable.logicalId));
+      .orderBy(asc(menuItemsTable.displayOrder), asc(menuItemsTable.id));
 
     return rows.map(toMenuItem);
   }
@@ -127,6 +129,8 @@ export class MenuRepository {
           category: input.category,
           description: input.description,
           imageUrl: input.image_url,
+          displayOrder:
+            input.display_order ?? (await this.nextDisplayOrder(tx)),
           isCurrentVersion: true,
           changeReason: input.change_reason ?? "Initial creation",
           createdBy,
@@ -165,6 +169,7 @@ export class MenuRepository {
           category: patch.category ?? current.category,
           description: patch.description ?? current.description,
           imageUrl: patch.image_url ?? current.imageUrl,
+          displayOrder: current.displayOrder,
           isCurrentVersion: true,
           supersedes: current.id,
           changeReason: patch.change_reason ?? "Menu item updated",
@@ -225,6 +230,36 @@ export class MenuRepository {
     };
   }
 
+  async reorderCurrentMenu(
+    items: Array<{ id: string; displayOrder: number }>,
+  ): Promise<MenuItem[] | null> {
+    return await db.transaction(async (tx) => {
+      const ids = items.map((item) => item.id);
+      const rows = await tx
+        .select()
+        .from(menuItemsTable)
+        .where(inArray(menuItemsTable.id, ids));
+
+      if (rows.length !== ids.length) return null;
+      if (rows.some((row) => !row.isCurrentVersion)) return null;
+
+      for (const item of items) {
+        await tx
+          .update(menuItemsTable)
+          .set({ displayOrder: item.displayOrder })
+          .where(eq(menuItemsTable.id, item.id));
+      }
+
+      const currentRows = await tx
+        .select()
+        .from(menuItemsTable)
+        .where(eq(menuItemsTable.isCurrentVersion, true))
+        .orderBy(asc(menuItemsTable.displayOrder), asc(menuItemsTable.id));
+
+      return currentRows.map(toMenuItem);
+    });
+  }
+
   private async nextLogicalId(tx: MenuTx): Promise<string> {
     const rows = await tx
       .select({ logicalId: menuItemsTable.logicalId })
@@ -237,6 +272,16 @@ export class MenuRepository {
     }, 0);
 
     return formatLogicalId(max + 1);
+  }
+
+  private async nextDisplayOrder(tx: MenuTx): Promise<number> {
+    const rows = await tx
+      .select({ displayOrder: menuItemsTable.displayOrder })
+      .from(menuItemsTable)
+      .where(eq(menuItemsTable.isCurrentVersion, true))
+      .orderBy(desc(menuItemsTable.displayOrder));
+
+    return (rows[0]?.displayOrder ?? 0) + 1;
   }
 
   private async findCurrentVersion(

@@ -65,6 +65,10 @@ function normalizePaymentStatus(value: unknown): PaymentStatus {
   return value === "paid" || value === "refunded" ? value : "unpaid";
 }
 
+function compareMenuItems(a: MenuItem, b: MenuItem): number {
+  return a.displayOrder - b.displayOrder || a.id.localeCompare(b.id);
+}
+
 function canUseCounterService(actorRoles: readonly Role[]): boolean {
   return actorRoles.some((role) =>
     role === "staff" || role === "owner" || role === "admin",
@@ -114,6 +118,7 @@ function createInitialMenuItem(
     category,
     description,
     image_url,
+    displayOrder: Number.parseInt(logicalId, 10) || 0,
     isCurrentVersion: true,
     changeReason: "Initial seed",
     createdAt: new Date(0).toISOString(),
@@ -158,6 +163,10 @@ function normalizeMenuItem(
     category: item.category ?? "",
     description: item.description ?? "",
     image_url: item.image_url ?? "",
+    displayOrder:
+      typeof item.displayOrder === "number" && Number.isFinite(item.displayOrder)
+        ? item.displayOrder
+        : fallback,
     isCurrentVersion: item.isCurrentVersion ?? true,
     supersedes: item.supersedes,
     changeReason: item.changeReason,
@@ -299,7 +308,9 @@ export class JsonFileStore implements Store {
   }
 
   getMenu(): ReadonlyArray<MenuItem> {
-    return this.menu.filter((item) => item.isCurrentVersion);
+    return this.menu
+      .filter((item) => item.isCurrentVersion)
+      .sort(compareMenuItems);
   }
 
   async createMenuItem(input: {
@@ -309,6 +320,7 @@ export class JsonFileStore implements Store {
     category: string;
     description: string;
     image_url: string;
+    display_order?: number;
     change_reason?: string;
   }): Promise<MenuItem> {
     const logicalId =
@@ -323,6 +335,7 @@ export class JsonFileStore implements Store {
       category: input.category,
       description: input.description,
       image_url: input.image_url,
+      displayOrder: input.display_order ?? this.nextDisplayOrder(),
       isCurrentVersion: true,
       changeReason: input.change_reason ?? "Initial creation",
       createdAt: new Date().toISOString(),
@@ -363,6 +376,7 @@ export class JsonFileStore implements Store {
       category: patch.category ?? current.category,
       description: patch.description ?? current.description,
       image_url: patch.image_url ?? current.image_url,
+      displayOrder: current.displayOrder,
       isCurrentVersion: true,
       supersedes: current.id,
       changeReason: patch.change_reason ?? "Menu item updated",
@@ -388,6 +402,28 @@ export class JsonFileStore implements Store {
     await this.persist();
 
     return menuItem;
+  }
+
+  async reorderMenu(
+    items: Array<{ id: string; displayOrder: number }>,
+  ): Promise<ReadonlyArray<MenuItem> | null> {
+    const currentItems = this.menu.filter((item) => item.isCurrentVersion);
+    const currentById = new Map(currentItems.map((item) => [item.id, item]));
+
+    for (const item of items) {
+      const target = currentById.get(item.id);
+      if (!target) return null;
+    }
+
+    for (const item of items) {
+      const target = currentById.get(item.id);
+      if (target) target.displayOrder = item.displayOrder;
+    }
+
+    this.sortMenu();
+    await this.persist();
+
+    return this.getMenu();
   }
 
   async getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>> {
@@ -746,6 +782,7 @@ export class JsonFileStore implements Store {
     this.users = store.users;
     this.menu = store.menu;
     this.orders = store.orders;
+    this.sortMenu();
 
     const maxUserId = this.users.reduce((max, user) => {
       const asNumber = Number.parseInt(user.id, 10);
@@ -764,6 +801,18 @@ export class JsonFileStore implements Store {
     this.userIdCounter = Math.max(store.userIdCounter || 0, maxUserId);
     this.menuIdCounter = Math.max(store.menuIdCounter || 0, maxMenuId);
     this.orderIdCounter = Math.max(store.orderIdCounter || 0, maxOrderId);
+  }
+
+  private sortMenu(): void {
+    this.menu.sort(compareMenuItems);
+  }
+
+  private nextDisplayOrder(): number {
+    return (
+      this.menu
+        .filter((item) => item.isCurrentVersion)
+        .reduce((max, item) => Math.max(max, item.displayOrder), 0) + 1
+    );
   }
 
   private buildStoreSnapshot(): DataStore {
