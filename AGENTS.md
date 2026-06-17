@@ -198,3 +198,37 @@ git diff --check
 - staff 點「完成取餐並收款」後，訂單變成 `completed` 且顯示 `已付款`。
 - customer 重新整理後，在歷史訂單看到 `已付款`。
 - cancelled 訂單不會顯示收款操作。
+
+## V10.4E 交接更新
+
+- 使用者已回報 `V10.4D 到店付款狀態` Render 驗證成功。
+- 本輪正在實作 `V10.4E 取餐叫號看板與顧客狀態提示`。
+- 本輪不新增 migration，直接由 `orders.status === "ready"` 推導公開叫號資料。
+
+### V10.4E 範圍
+
+- 新增公開 API：`GET /api/orders/pickup-board`
+- API 不需要登入，方便店面展示螢幕或顧客查看。
+- API 只回傳 `ready` 訂單，依建立時間新到舊排序，最多 20 筆。
+- API 只回傳公開欄位：`id`、`pickupCode`、`status`、`createdAt`、`createdAtTaipei`。
+- 不回傳 `userId`、餐點內容、金額、備註、付款資訊。
+- 前端新增公開「取餐叫號」區塊，提供手動重新整理。
+- 顧客歷史訂單中，`ready` 訂單顯示「餐點已完成，請依取餐編號取餐」提示。
+
+### V10.4E 本機驗證命令
+
+```bash
+bun test
+bun run build
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts tests/v10-order-pickup-info.test.ts tests/v10-order-cancellation.test.ts tests/v10-order-payment.test.ts tests/v10-pickup-board.test.ts
+git diff --check
+```
+
+### V10.4E Render 驗證清單
+
+- 未登入訪客也能看到「取餐叫號」區塊。
+- customer 送出訂單後，看板不顯示該訂單。
+- chef 將訂單推進到 `ready` 後，看板顯示該訂單取餐編號。
+- customer 在「我的訂單歷史」看到 ready 取餐提示。
+- staff 點「完成取餐並收款」後，看板移除該訂單。
+- `GET /api/orders/pickup-board` 不回傳個資、備註、餐點、金額或付款資訊。

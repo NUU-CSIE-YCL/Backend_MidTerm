@@ -25,6 +25,7 @@ import {
   nullableOrderResponseEnvelopeSchema,
   orderListResponseSchema,
   orderResponseEnvelopeSchema,
+  pickupBoardListResponseSchema,
   reviewRoleRequestBodySchema,
   reviewRoleRequestParamsSchema,
   roleRequestListResponseSchema,
@@ -32,6 +33,7 @@ import {
   roleAuditLogListResponseSchema,
   submitOrderBodySchema,
   submitOrderParamsSchema,
+  toPickupBoardOrder,
   toOrderResponse,
   updateAdminUserRolesBodySchema,
   updateAdminUserRolesParamsSchema,
@@ -938,6 +940,28 @@ app.get(
 );
 
 // 取得使用者目前進行中的訂單
+app.get(
+  "/api/orders/pickup-board",
+  () => ({
+    data: store
+      .getWorkbenchOrders()
+      .filter((order) => order.status === "ready")
+      .slice(0, 20)
+      .map(toPickupBoardOrder),
+  }),
+  {
+    detail: {
+      tags: ["orders"],
+      summary: "List pickup board orders",
+      description:
+        "Return public pickup codes for ready orders without customer details.",
+    },
+    response: {
+      200: pickupBoardListResponseSchema,
+    },
+  },
+);
+
 app.get(
   "/api/orders/current",
   async ({ request }) => {

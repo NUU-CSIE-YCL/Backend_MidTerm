@@ -60,6 +60,16 @@ export const orderResponseSchema = orderSchema.extend({
 
 export type OrderResponse = z.infer<typeof orderResponseSchema>;
 
+export const pickupBoardOrderSchema = z.object({
+  id: z.number().int().min(1),
+  pickupCode: z.string().min(1),
+  status: z.literal("ready"),
+  createdAt: z.string().min(1),
+  createdAtTaipei: z.string().min(1),
+});
+
+export type PickupBoardOrder = z.infer<typeof pickupBoardOrderSchema>;
+
 /**
  * 將數據庫/內部 Order 轉換為 API 響應格式
  * 添加台北時區時間戳
@@ -69,6 +79,16 @@ export function toOrderResponse(order: Order): OrderResponse {
     ...order,
     createdAtTaipei: toTaipeiDateTime(order.createdAt),
     pickupCode: `A-${String(order.id).padStart(4, "0")}`,
+  };
+}
+
+export function toPickupBoardOrder(order: Order): PickupBoardOrder {
+  return {
+    id: order.id,
+    pickupCode: `A-${String(order.id).padStart(4, "0")}`,
+    status: "ready",
+    createdAt: order.createdAt,
+    createdAtTaipei: toTaipeiDateTime(order.createdAt),
   };
 }
 
@@ -213,6 +233,10 @@ export const menuHistoryResponseSchema = z.object({
 
 export const orderListResponseSchema = z.object({
   data: z.array(orderResponseSchema),
+});
+
+export const pickupBoardListResponseSchema = z.object({
+  data: z.array(pickupBoardOrderSchema),
 });
 
 export const orderResponseEnvelopeSchema = z.object({

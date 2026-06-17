@@ -97,6 +97,14 @@ type AppOrder = Order & {
   pickupCode: string;
 };
 
+interface PickupBoardOrder {
+  id: number;
+  pickupCode: string;
+  status: "ready";
+  createdAt: string;
+  createdAtTaipei: string;
+}
+
 function createEmptyMenuForm(): MenuFormState {
   return {
     logical_id: "",
@@ -254,6 +262,11 @@ export default function App() {
   const [workbenchOrders, setWorkbenchOrders] = useState<AppOrder[]>([]);
   const [workbenchLoading, setWorkbenchLoading] = useState(false);
   const [workbenchError, setWorkbenchError] = useState("");
+  const [pickupBoardOrders, setPickupBoardOrders] = useState<
+    PickupBoardOrder[]
+  >([]);
+  const [pickupBoardLoading, setPickupBoardLoading] = useState(false);
+  const [pickupBoardError, setPickupBoardError] = useState("");
   const [updatingWorkbenchOrderId, setUpdatingWorkbenchOrderId] = useState<
     number | null
   >(null);
@@ -441,6 +454,26 @@ export default function App() {
       setWorkbenchOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
       setWorkbenchLoading(false);
+    }
+  }
+
+  async function loadPickupBoardOrders(): Promise<void> {
+    setPickupBoardLoading(true);
+    setPickupBoardError("");
+
+    try {
+      const response = await fetch(buildApiUrl("/api/orders/pickup-board"));
+
+      if (!response.ok) {
+        throw new Error(`Load pickup board failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<
+        PickupBoardOrder[]
+      >;
+      setPickupBoardOrders(Array.isArray(payload?.data) ? payload.data : []);
+    } finally {
+      setPickupBoardLoading(false);
     }
   }
 
@@ -650,6 +683,12 @@ export default function App() {
     }
 
     void loadInitialMenu();
+    void loadPickupBoardOrders().catch((pickupBoardLoadError) => {
+      if (mounted) {
+        setPickupBoardError("載入取餐叫號失敗，請稍後再試。");
+        console.error(pickupBoardLoadError);
+      }
+    });
 
     return () => {
       mounted = false;
@@ -1324,7 +1363,11 @@ export default function App() {
         throw new Error(`Update order status failed: HTTP ${response.status}`);
       }
 
-      await Promise.all([loadWorkbenchOrders(), loadOrderHistory()]);
+      await Promise.all([
+        loadWorkbenchOrders(),
+        loadOrderHistory(),
+        loadPickupBoardOrders(),
+      ]);
     } catch (updateError) {
       setWorkbenchError(
         updateError instanceof Error
@@ -1376,6 +1419,7 @@ export default function App() {
       await Promise.all([
         loadOrderHistory(),
         canViewOrderWorkbench ? loadWorkbenchOrders() : Promise.resolve(),
+        loadPickupBoardOrders(),
       ]);
     } catch (cancelError) {
       const message =
@@ -2222,6 +2266,60 @@ export default function App() {
           </section>
         ) : null}
 
+        <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold">取餐叫號</h2>
+              <p className="text-sm opacity-70">
+                餐點完成後，請依取餐編號到櫃台取餐。
+              </p>
+            </div>
+            <button
+              className="btn btn-sm btn-outline"
+              disabled={pickupBoardLoading}
+              onClick={() => {
+                void loadPickupBoardOrders();
+              }}
+              type="button"
+            >
+              {pickupBoardLoading ? "讀取中" : "重新整理"}
+            </button>
+          </div>
+
+          {pickupBoardError ? (
+            <div className="alert alert-error mb-3 py-2">
+              <span>{pickupBoardError}</span>
+            </div>
+          ) : null}
+
+          {pickupBoardLoading ? (
+            <div className="alert py-2">
+              <span>讀取中...</span>
+            </div>
+          ) : pickupBoardOrders.length === 0 ? (
+            <div className="alert alert-info py-2">
+              <span>目前沒有等待取餐的訂單。</span>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {pickupBoardOrders.map((order) => (
+                <article
+                  className="rounded border border-primary/30 bg-primary/10 p-4 text-center"
+                  key={order.id}
+                >
+                  <div className="text-xs opacity-70">取餐編號</div>
+                  <div className="text-3xl font-bold text-primary">
+                    {order.pickupCode}
+                  </div>
+                  <div className="mt-2 text-xs opacity-70">
+                    {formatVersionTime(order.createdAt)}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
         {canViewOrderWorkbench ? (
           <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -2793,6 +2891,11 @@ export default function App() {
                           </li>
                         ))}
                       </ul>
+                      {order.status === "ready" ? (
+                        <p className="rounded bg-primary/10 px-3 py-2 text-sm font-semibold text-primary">
+                          餐點已完成，請依取餐編號 {order.pickupCode} 取餐。
+                        </p>
+                      ) : null}
                       <p className="rounded bg-base-200 px-3 py-2 text-sm">
                         備註：{order.customerNote || "無備註"}
                       </p>
