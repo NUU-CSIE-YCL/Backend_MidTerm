@@ -18,6 +18,8 @@ import type {
   MenuItem,
   Order,
   OrderStatus,
+  OperationsSummary,
+  OperationsSummaryRange,
   PaymentStatus,
   RequestableRole,
   Role,
@@ -277,6 +279,13 @@ export default function App() {
   const [workbenchOrders, setWorkbenchOrders] = useState<AppOrder[]>([]);
   const [workbenchLoading, setWorkbenchLoading] = useState(false);
   const [workbenchError, setWorkbenchError] = useState("");
+  const [operationsSummary, setOperationsSummary] =
+    useState<OperationsSummary | null>(null);
+  const [operationsSummaryRange, setOperationsSummaryRange] =
+    useState<OperationsSummaryRange>("today");
+  const [operationsSummaryLoading, setOperationsSummaryLoading] =
+    useState(false);
+  const [operationsSummaryError, setOperationsSummaryError] = useState("");
   const [pickupBoardOrders, setPickupBoardOrders] = useState<
     PickupBoardOrder[]
   >([]);
@@ -471,6 +480,43 @@ export default function App() {
       setWorkbenchOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
       if (showLoading) setWorkbenchLoading(false);
+    }
+  }
+
+  async function loadOperationsSummary(
+    range: OperationsSummaryRange = operationsSummaryRange,
+    showLoading = true,
+  ): Promise<void> {
+    if (!user || !hasAnyRole(user, counterWorkflowRoles)) return;
+
+    if (showLoading) {
+      setOperationsSummaryLoading(true);
+      setOperationsSummaryError("");
+    }
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/orders/operations-summary?range=${range}`),
+        { credentials: "include" },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再查看營運摘要。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有查看營運摘要權限。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Load operations summary failed: HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiDataResponse<OperationsSummary>;
+      setOperationsSummary(payload.data);
+    } finally {
+      if (showLoading) setOperationsSummaryLoading(false);
     }
   }
 
@@ -722,6 +768,7 @@ export default function App() {
       setAdminRoleRequests([]);
       setAdminUsers([]);
       setRoleAuditLogs([]);
+      setOperationsSummary(null);
       setRolesByUserId({});
       setRoleRequestMessage("");
       setRoleRequestError("");
@@ -730,6 +777,7 @@ export default function App() {
       setAdminUsersMessage("");
       setAdminUsersError("");
       setRoleAuditLogsError("");
+      setOperationsSummaryError("");
       setWorkbenchError("");
       setIsCartOpen(false);
       resetCartState();
@@ -750,6 +798,13 @@ export default function App() {
       void loadWorkbenchOrders().catch((workbenchLoadError) => {
         setWorkbenchError("載入訂單工作台失敗，請稍後再試。");
         console.error(workbenchLoadError);
+      });
+    }
+
+    if (hasAnyRole(user, counterWorkflowRoles)) {
+      void loadOperationsSummary().catch((summaryLoadError) => {
+        setOperationsSummaryError("載入營運摘要失敗，請稍後再試。");
+        console.error(summaryLoadError);
       });
     }
 
@@ -848,6 +903,9 @@ export default function App() {
   const canReviewRoleRequests = user ? hasAnyRole(user, adminRoles) : false;
   const canManageUsers = user ? hasAnyRole(user, adminRoles) : false;
   const canViewOrderWorkbench = user ? hasAnyRole(user, orderViewerRoles) : false;
+  const canViewOperationsSummary = user
+    ? hasAnyRole(user, counterWorkflowRoles)
+    : false;
   const availableRequestRoles = user
     ? requestableRoles.filter((role) => !user.roles.includes(role))
     : [];
@@ -1439,6 +1497,9 @@ export default function App() {
 
       await Promise.all([
         loadWorkbenchOrders(),
+        canViewOperationsSummary
+          ? loadOperationsSummary(operationsSummaryRange, false)
+          : Promise.resolve(),
         loadOrderHistory(),
         loadPickupBoardOrders(),
       ]);
@@ -1493,6 +1554,9 @@ export default function App() {
       await Promise.all([
         loadOrderHistory(),
         canViewOrderWorkbench ? loadWorkbenchOrders() : Promise.resolve(),
+        canViewOperationsSummary
+          ? loadOperationsSummary(operationsSummaryRange, false)
+          : Promise.resolve(),
         loadPickupBoardOrders(),
       ]);
     } catch (cancelError) {
@@ -1550,6 +1614,9 @@ export default function App() {
       await Promise.all([
         loadOrderHistory(),
         canViewOrderWorkbench ? loadWorkbenchOrders() : Promise.resolve(),
+        canViewOperationsSummary
+          ? loadOperationsSummary(operationsSummaryRange, false)
+          : Promise.resolve(),
         loadPickupBoardOrders(),
       ]);
     } catch (refundError) {
@@ -1607,6 +1674,9 @@ export default function App() {
       await Promise.all([
         loadOrderHistory(),
         canViewOrderWorkbench ? loadWorkbenchOrders() : Promise.resolve(),
+        canViewOperationsSummary
+          ? loadOperationsSummary(operationsSummaryRange, false)
+          : Promise.resolve(),
         loadPickupBoardOrders(),
       ]);
     } catch (reopenError) {
@@ -1817,6 +1887,9 @@ export default function App() {
       await loadOrderHistory();
       if (canViewOrderWorkbench) {
         await loadWorkbenchOrders();
+      }
+      if (canViewOperationsSummary) {
+        await loadOperationsSummary(operationsSummaryRange, false);
       }
     } catch (submitError) {
       setActionError("送出訂單失敗，請稍後再試。");
@@ -2507,6 +2580,138 @@ export default function App() {
             </div>
           )}
         </section>
+
+        {canViewOperationsSummary ? (
+          <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">營運摘要</h2>
+                <p className="text-sm opacity-70">
+                  staff/owner/admin 可查看訂單、收款、退款與待處理狀態。
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <div className="join">
+                  {(["today", "all"] as const).map((range) => (
+                    <button
+                      className={`btn join-item btn-sm ${
+                        operationsSummaryRange === range
+                          ? "btn-primary"
+                          : "btn-outline"
+                      }`}
+                      key={range}
+                      onClick={() => {
+                        setOperationsSummaryRange(range);
+                        void loadOperationsSummary(range);
+                      }}
+                      type="button"
+                    >
+                      {range === "today" ? "今日" : "全部"}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="btn btn-sm btn-outline"
+                  disabled={operationsSummaryLoading}
+                  onClick={() => {
+                    void loadOperationsSummary(operationsSummaryRange);
+                  }}
+                  type="button"
+                >
+                  {operationsSummaryLoading ? "載入中" : "重新整理"}
+                </button>
+              </div>
+            </div>
+
+            {operationsSummaryError ? (
+              <div className="alert alert-error mb-3 py-2">
+                <span>{operationsSummaryError}</span>
+              </div>
+            ) : null}
+
+            {operationsSummaryLoading && !operationsSummary ? (
+              <div className="alert py-2">
+                <span>載入中...</span>
+              </div>
+            ) : operationsSummary ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="stat rounded border border-base-300 bg-base-200">
+                    <div className="stat-title">淨營收</div>
+                    <div className="stat-value text-primary">
+                      ${operationsSummary.netRevenue}
+                    </div>
+                    <div className="stat-desc">
+                      已收 ${operationsSummary.grossRevenue}，退款 $
+                      {operationsSummary.refundedAmount}
+                    </div>
+                  </div>
+                  <div className="stat rounded border border-base-300 bg-base-200">
+                    <div className="stat-title">有效訂單</div>
+                    <div className="stat-value">
+                      {operationsSummary.orderCount}
+                    </div>
+                    <div className="stat-desc">
+                      完成 {operationsSummary.completedOrderCount}，取消{" "}
+                      {operationsSummary.cancelledOrderCount}
+                    </div>
+                  </div>
+                  <div className="stat rounded border border-base-300 bg-base-200">
+                    <div className="stat-title">待處理</div>
+                    <div className="stat-value text-warning">
+                      {operationsSummary.activeOrderCount}
+                    </div>
+                    <div className="stat-desc">
+                      未收款金額 ${operationsSummary.unpaidAmount}
+                    </div>
+                  </div>
+                  <div className="stat rounded border border-base-300 bg-base-200">
+                    <div className="stat-title">售後</div>
+                    <div className="stat-value text-error">
+                      {operationsSummary.refundedOrderCount}
+                    </div>
+                    <div className="stat-desc">
+                      已付款 {operationsSummary.paidOrderCount} 筆
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-6">
+                  {(
+                    [
+                      "submitted",
+                      "preparing",
+                      "ready",
+                      "completed",
+                      "cancelled",
+                      "pending",
+                    ] as const
+                  ).map((status) => (
+                    <div
+                      className="rounded border border-base-300 bg-base-200 px-3 py-2"
+                      key={status}
+                    >
+                      <div className="text-xs opacity-70">
+                        {orderStatusLabels[status]}
+                      </div>
+                      <div className="text-xl font-bold">
+                        {operationsSummary.byStatus[status]}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs opacity-70">
+                  統計時間：{operationsSummary.generatedAtTaipei}
+                </p>
+              </div>
+            ) : (
+              <div className="alert alert-info py-2">
+                <span>尚無摘要資料</span>
+              </div>
+            )}
+          </section>
+        ) : null}
 
         {canViewOrderWorkbench ? (
           <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">

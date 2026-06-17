@@ -1,5 +1,37 @@
 # AGENTS.md
 
+## 最新交接補充：V10.4H 營運摘要看板
+
+- 使用者已回報 `V10.4G 退款與取消訂單重開` Render 驗證成功。
+- 本輪實作 `V10.4H 營運摘要看板`，不新增 migration。
+- 新增 API：`GET /api/orders/operations-summary?range=today|all`
+  - 需要 `staff/owner/admin`
+  - `chef` 不可查看營收摘要，仍使用訂單工作台處理製作流程
+  - `customer` 不可查看
+- 摘要由既有 orders 推導：
+  - 排除 `pending` 購物車
+  - `today` 使用 Asia/Taipei 日期判斷
+  - 回傳訂單總數、待處理數、完成數、取消數、已付款數、已退款數
+  - 回傳 `grossRevenue`、`refundedAmount`、`netRevenue`、`unpaidAmount`
+  - 回傳各 order status 固定計數
+- 前端新增 admin/staff/owner 可見的「營運摘要」區塊：
+  - 今日/全部切換
+  - 重新整理按鈕
+  - 顯示淨營收、有效訂單、待處理、售後與各狀態數量
+- 新增測試：`tests/v10-operations-summary.test.ts`
+- 本輪建議驗證：
+  - `bun test`
+  - `bun run build`
+  - `bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts tests/v10-order-pickup-info.test.ts tests/v10-order-cancellation.test.ts tests/v10-order-payment.test.ts tests/v10-pickup-board.test.ts tests/v10-auto-refresh.test.ts tests/v10-refund-reopen.test.ts tests/v10-operations-summary.test.ts`
+  - `git diff --check`
+- Render 驗證清單：
+  - staff/owner/admin 登入後看到「營運摘要」
+  - customer/chef 看不到「營運摘要」
+  - customer 送出訂單後，staff 的今日摘要有效訂單與未收款金額增加
+  - staff 完成取餐並收款後，淨營收增加
+  - staff 退款後，退款金額增加且淨營收下降
+  - 今日/全部切換可正常更新數字
+
 本檔是給下一個 Codex/session 的交接紀錄。請先讀完這份，再看 `報告.md` 與 `git status --short`。
 
 ## 專案脈絡

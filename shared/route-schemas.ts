@@ -3,6 +3,8 @@ import type { Order } from "./contracts.ts";
 import {
   adminUserSchema,
   menuItemSchema,
+  operationsSummaryRangeSchema,
+  operationsSummarySchema,
   orderSchema,
   requestableRoleSchema,
   roleAuditActionSchema,
@@ -49,6 +51,10 @@ export const adminUserListResponseSchema = z.object({
 
 export const roleAuditLogListResponseSchema = z.object({
   data: z.array(roleAuditLogSchema),
+});
+
+export const operationsSummaryResponseSchema = z.object({
+  data: operationsSummarySchema,
 });
 
 // ─── API Layer Order Response（Order 的 API 層呈現）──────────────────────
@@ -239,6 +245,11 @@ export const listRoleAuditLogsQuerySchema = z.object({
   targetUserId: z.string().min(1).optional(),
   actorUserId: z.string().min(1).optional(),
   action: roleAuditActionSchema.optional(),
+});
+
+/** GET /api/orders/operations-summary */
+export const operationsSummaryQuerySchema = z.object({
+  range: operationsSummaryRangeSchema.optional().default("today"),
 });
 
 // ─── Response Schemas（API envelope 層）─────────────────────────────────

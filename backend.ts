@@ -24,6 +24,8 @@ import {
   menuListResponseSchema,
   nullableOrderResponseEnvelopeSchema,
   orderListResponseSchema,
+  operationsSummaryQuerySchema,
+  operationsSummaryResponseSchema,
   orderResponseEnvelopeSchema,
   pickupBoardListResponseSchema,
   reviewRoleRequestBodySchema,
@@ -56,6 +58,9 @@ import { roleAuditLogsTable, roleRequestsTable } from "./db/schema.ts";
 import { hasAnyRole, normalizeRoles, requireAnyRole } from "./shared/guards.ts";
 import type {
   AdminUser,
+  OperationsSummary,
+  OperationsSummaryRange,
+  Order,
   OrderStatus,
   Role,
   RoleAuditAction,
@@ -81,6 +86,96 @@ const orderViewerRoles = [
 const kitchenWorkflowRoles = ["chef", "owner", "admin"] as const satisfies readonly Role[];
 const counterWorkflowRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
 const orderCancellationRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
+
+const operationalStatuses = [
+  "pending",
+  "submitted",
+  "preparing",
+  "ready",
+  "completed",
+  "cancelled",
+] as const satisfies readonly OrderStatus[];
+
+function getTaipeiDateKey(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function createOperationsSummary(
+  orders: readonly Order[],
+  range: OperationsSummaryRange,
+): OperationsSummary {
+  const now = new Date();
+  const todayKey = getTaipeiDateKey(now.toISOString());
+  const byStatus = Object.fromEntries(
+    operationalStatuses.map((status) => [status, 0]),
+  ) as OperationsSummary["byStatus"];
+
+  let orderCount = 0;
+  let activeOrderCount = 0;
+  let completedOrderCount = 0;
+  let cancelledOrderCount = 0;
+  let paidOrderCount = 0;
+  let refundedOrderCount = 0;
+  let grossRevenue = 0;
+  let refundedAmount = 0;
+  let unpaidAmount = 0;
+
+  for (const order of orders) {
+    if (order.status === "pending") continue;
+    if (range === "today" && getTaipeiDateKey(order.createdAt) !== todayKey) {
+      continue;
+    }
+
+    orderCount += 1;
+    byStatus[order.status] += 1;
+
+    if (
+      order.status === "submitted" ||
+      order.status === "preparing" ||
+      order.status === "ready"
+    ) {
+      activeOrderCount += 1;
+    }
+    if (order.status === "completed") completedOrderCount += 1;
+    if (order.status === "cancelled") cancelledOrderCount += 1;
+
+    if (order.paymentStatus === "paid") {
+      paidOrderCount += 1;
+      grossRevenue += order.total;
+    } else if (order.paymentStatus === "refunded") {
+      refundedOrderCount += 1;
+      grossRevenue += order.total;
+      refundedAmount += order.total;
+    } else if (order.status !== "cancelled") {
+      unpaidAmount += order.total;
+    }
+  }
+
+  return {
+    range,
+    generatedAt: now.toISOString(),
+    generatedAtTaipei: toTaipeiDateTime(now.toISOString()),
+    orderCount,
+    activeOrderCount,
+    completedOrderCount,
+    cancelledOrderCount,
+    paidOrderCount,
+    refundedOrderCount,
+    grossRevenue,
+    refundedAmount,
+    netRevenue: Math.max(grossRevenue - refundedAmount, 0),
+    unpaidAmount,
+    byStatus,
+  };
+}
 
 // ─── Auth Helper ──────────────────────────────────────────────────────────────
 // 簡化的 helper 函數，用於保護路由並獲取 user，失敗時拋出 401 錯誤
@@ -944,6 +1039,35 @@ app.get(
 );
 
 // 取得使用者目前進行中的訂單
+app.get(
+  "/api/orders/operations-summary",
+  async ({ query, request }) => {
+    await requireUserWithAnyRole(request, counterWorkflowRoles);
+    const summaryQuery = query as { range?: OperationsSummaryRange };
+
+    return {
+      data: createOperationsSummary(
+        store.getOrders(),
+        summaryQuery.range ?? "today",
+      ),
+    };
+  },
+  {
+    query: operationsSummaryQuerySchema,
+    detail: {
+      tags: ["orders"],
+      summary: "Get operations summary",
+      description:
+        "Return order and revenue summary for staff, owner, and admin users.",
+    },
+    response: {
+      200: operationsSummaryResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
 app.get(
   "/api/orders/pickup-board",
   () => ({

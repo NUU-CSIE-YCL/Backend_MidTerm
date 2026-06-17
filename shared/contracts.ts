@@ -34,6 +34,8 @@ export const orderStatusSchema = z.enum([
 
 export const paymentStatusSchema = z.enum(["unpaid", "paid", "refunded"]);
 
+export const operationsSummaryRangeSchema = z.enum(["today", "all"]);
+
 export const menuItemSchema = z.object({
   id: z.string().min(1),
   entityId: z.string().min(1),
@@ -92,6 +94,30 @@ export const orderSchema = z.object({
   submittedAt: z.string().min(1).optional(),
 });
 
+export const operationsSummarySchema = z.object({
+  range: operationsSummaryRangeSchema,
+  generatedAt: z.string().min(1),
+  generatedAtTaipei: z.string().min(1),
+  orderCount: z.number().int().min(0),
+  activeOrderCount: z.number().int().min(0),
+  completedOrderCount: z.number().int().min(0),
+  cancelledOrderCount: z.number().int().min(0),
+  paidOrderCount: z.number().int().min(0),
+  refundedOrderCount: z.number().int().min(0),
+  grossRevenue: z.number().min(0),
+  refundedAmount: z.number().min(0),
+  netRevenue: z.number().min(0),
+  unpaidAmount: z.number().min(0),
+  byStatus: z.object({
+    pending: z.number().int().min(0),
+    submitted: z.number().int().min(0),
+    preparing: z.number().int().min(0),
+    ready: z.number().int().min(0),
+    completed: z.number().int().min(0),
+    cancelled: z.number().int().min(0),
+  }),
+});
+
 export const roleRequestSchema = z.object({
   id: z.number().int().min(1),
   userId: z.string().min(1),
@@ -129,12 +155,16 @@ export type RoleRequestStatus = z.infer<typeof roleRequestStatusSchema>;
 export type RoleAuditAction = z.infer<typeof roleAuditActionSchema>;
 export type OrderStatus = z.infer<typeof orderStatusSchema>;
 export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
+export type OperationsSummaryRange = z.infer<
+  typeof operationsSummaryRangeSchema
+>;
 export type MenuItem = z.infer<typeof menuItemSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
 export type User = SessionUser;
 export type OrderItem = z.infer<typeof orderItemSchema>;
 export type Order = z.infer<typeof orderSchema>;
+export type OperationsSummary = z.infer<typeof operationsSummarySchema>;
 export type RoleRequest = z.infer<typeof roleRequestSchema>;
 export type RoleAuditLog = z.infer<typeof roleAuditLogSchema>;
 
