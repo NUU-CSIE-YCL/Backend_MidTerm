@@ -63,6 +63,7 @@ describe("V10.4E pickup board contracts", () => {
       paidBy: null,
       customerNote: "不要辣",
       cancelReason: "",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       submittedAt: "2026-06-16T00:01:00.000Z",
     });

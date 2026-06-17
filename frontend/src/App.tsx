@@ -78,6 +78,7 @@ const orderStatusLabels: Record<OrderStatus, string> = {
 const paymentStatusLabels: Record<PaymentStatus, string> = {
   unpaid: "未付款",
   paid: "已付款",
+  refunded: "已退款",
 };
 const roleAuditActionLabels: Record<RoleAuditAction, string> = {
   role_request_approved: "申請核准",
@@ -180,7 +181,15 @@ function orderStatusBadgeClass(status: OrderStatus): string {
 }
 
 function paymentStatusBadgeClass(status: PaymentStatus): string {
-  return status === "paid" ? "badge badge-success" : "badge badge-warning";
+  switch (status) {
+    case "paid":
+      return "badge badge-success";
+    case "refunded":
+      return "badge badge-error";
+    case "unpaid":
+    default:
+      return "badge badge-warning";
+  }
 }
 
 function MenuImage({
@@ -277,6 +286,8 @@ export default function App() {
     number | null
   >(null);
   const [cancelingOrderId, setCancelingOrderId] = useState<number | null>(null);
+  const [refundingOrderId, setRefundingOrderId] = useState<number | null>(null);
+  const [reopeningOrderId, setReopeningOrderId] = useState<number | null>(null);
   const [cartQtyByItemId, setCartQtyByItemId] = useState<
     Record<string, number>
   >({});
@@ -763,7 +774,9 @@ export default function App() {
     isSubmittingOrder ||
     isClearingCart ||
     updatingWorkbenchOrderId !== null ||
-    cancelingOrderId !== null;
+    cancelingOrderId !== null ||
+    refundingOrderId !== null ||
+    reopeningOrderId !== null;
 
   useEffect(() => {
     const timerId = window.setInterval(() => {
@@ -1495,6 +1508,120 @@ export default function App() {
       console.error(cancelError);
     } finally {
       setCancelingOrderId(null);
+    }
+  }
+
+  async function refundOrder(order: AppOrder): Promise<void> {
+    const confirmed = window.confirm(`確定要退款 ${order.pickupCode} 嗎？`);
+    if (!confirmed) return;
+
+    setRefundingOrderId(order.id);
+    setWorkbenchError("");
+    setActionError("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/orders/${order.id}/refund`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({}),
+        },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再退款。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有退款權限。");
+      }
+
+      if (response.status === 409) {
+        throw new Error("此訂單目前無法退款，請重新整理後再試。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Refund order failed: HTTP ${response.status}`);
+      }
+
+      await Promise.all([
+        loadOrderHistory(),
+        canViewOrderWorkbench ? loadWorkbenchOrders() : Promise.resolve(),
+        loadPickupBoardOrders(),
+      ]);
+    } catch (refundError) {
+      const message =
+        refundError instanceof Error
+          ? refundError.message
+          : "退款失敗，請稍後再試。";
+      if (canViewOrderWorkbench) {
+        setWorkbenchError(message);
+      } else {
+        setActionError(message);
+      }
+      console.error(refundError);
+    } finally {
+      setRefundingOrderId(null);
+    }
+  }
+
+  async function reopenOrder(order: AppOrder): Promise<void> {
+    const confirmed = window.confirm(`確定要重開 ${order.pickupCode} 嗎？`);
+    if (!confirmed) return;
+
+    setReopeningOrderId(order.id);
+    setWorkbenchError("");
+    setActionError("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/orders/${order.id}/reopen`),
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({}),
+        },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再重開訂單。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有重開訂單權限。");
+      }
+
+      if (response.status === 409) {
+        throw new Error("此訂單目前無法重開，請重新整理後再試。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Reopen order failed: HTTP ${response.status}`);
+      }
+
+      await Promise.all([
+        loadOrderHistory(),
+        canViewOrderWorkbench ? loadWorkbenchOrders() : Promise.resolve(),
+        loadPickupBoardOrders(),
+      ]);
+    } catch (reopenError) {
+      const message =
+        reopenError instanceof Error
+          ? reopenError.message
+          : "重開訂單失敗，請稍後再試。";
+      if (canViewOrderWorkbench) {
+        setWorkbenchError(message);
+      } else {
+        setActionError(message);
+      }
+      console.error(reopenError);
+    } finally {
+      setReopeningOrderId(null);
     }
   }
 
@@ -2427,6 +2554,12 @@ export default function App() {
                     user &&
                     hasAnyRole(user, orderCancellationRoles) &&
                     ["submitted", "preparing", "ready"].includes(order.status);
+                  const canRefundFromWorkbench =
+                    canUseCounterFlow &&
+                    order.status === "completed" &&
+                    order.paymentStatus === "paid";
+                  const canReopenFromWorkbench =
+                    canUseCounterFlow && order.status === "cancelled";
                   const nextAction =
                     order.status === "submitted" && canUseKitchenFlow
                       ? { status: "preparing" as const, label: "開始製作" }
@@ -2495,13 +2628,27 @@ export default function App() {
                         </p>
                       ) : null}
 
+                      {order.paymentStatus === "refunded" ? (
+                        <p className="mb-3 rounded bg-warning/10 px-3 py-2 text-sm">
+                          退款時間：{formatVersionTime(order.refundedAt)}
+                          <br />
+                          退款者：{order.refundedBy ?? "未知"}
+                          <br />
+                          退款原因：{order.refundReason || "無退款原因"}
+                        </p>
+                      ) : null}
+
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="font-bold">總計 ${order.total}</span>
                         <div className="flex flex-wrap gap-2">
                           {canCancelFromWorkbench ? (
                             <button
                               className="btn btn-error btn-outline btn-sm"
-                              disabled={cancelingOrderId === order.id}
+                              disabled={
+                                cancelingOrderId === order.id ||
+                                refundingOrderId === order.id ||
+                                reopeningOrderId === order.id
+                              }
                               onClick={() => {
                                 void cancelOrder(order);
                               }}
@@ -2512,12 +2659,50 @@ export default function App() {
                                 : "取消訂單"}
                             </button>
                           ) : null}
+                          {canRefundFromWorkbench ? (
+                            <button
+                              className="btn btn-warning btn-outline btn-sm"
+                              disabled={
+                                cancelingOrderId === order.id ||
+                                refundingOrderId === order.id ||
+                                reopeningOrderId === order.id
+                              }
+                              onClick={() => {
+                                void refundOrder(order);
+                              }}
+                              type="button"
+                            >
+                              {refundingOrderId === order.id
+                                ? "退款中..."
+                                : "退款"}
+                            </button>
+                          ) : null}
+                          {canReopenFromWorkbench ? (
+                            <button
+                              className="btn btn-info btn-outline btn-sm"
+                              disabled={
+                                cancelingOrderId === order.id ||
+                                refundingOrderId === order.id ||
+                                reopeningOrderId === order.id
+                              }
+                              onClick={() => {
+                                void reopenOrder(order);
+                              }}
+                              type="button"
+                            >
+                              {reopeningOrderId === order.id
+                                ? "重開中..."
+                                : "重開訂單"}
+                            </button>
+                          ) : null}
                           {nextAction ? (
                             <button
                               className="btn btn-primary btn-sm"
                               disabled={
                                 updatingWorkbenchOrderId === order.id ||
-                                cancelingOrderId === order.id
+                                cancelingOrderId === order.id ||
+                                refundingOrderId === order.id ||
+                                reopeningOrderId === order.id
                               }
                               onClick={() => {
                                 void advanceWorkbenchOrder(
@@ -2531,7 +2716,8 @@ export default function App() {
                                 ? "更新中..."
                                 : nextAction.label}
                             </button>
-                          ) : (
+                          ) : canRefundFromWorkbench ||
+                            canReopenFromWorkbench ? null : (
                             <span className="text-xs opacity-70">
                               目前角色無下一步操作
                             </span>
@@ -2972,6 +3158,15 @@ export default function App() {
                           收款時間：{formatVersionTime(order.paidAt)}
                           <br />
                           收款者：{order.paidBy ?? "未知"}
+                        </p>
+                      ) : null}
+                      {order.paymentStatus === "refunded" ? (
+                        <p className="rounded bg-warning/10 px-3 py-2 text-sm">
+                          退款時間：{formatVersionTime(order.refundedAt)}
+                          <br />
+                          退款者：{order.refundedBy ?? "未知"}
+                          <br />
+                          退款原因：{order.refundReason || "無退款原因"}
                         </p>
                       ) : null}
                       {order.status === "submitted" ? (

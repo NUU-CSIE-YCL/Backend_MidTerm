@@ -32,7 +32,7 @@ export const orderStatusSchema = z.enum([
   "cancelled",
 ]);
 
-export const paymentStatusSchema = z.enum(["unpaid", "paid"]);
+export const paymentStatusSchema = z.enum(["unpaid", "paid", "refunded"]);
 
 export const menuItemSchema = z.object({
   id: z.string().min(1),
@@ -81,6 +81,9 @@ export const orderSchema = z.object({
   paymentStatus: paymentStatusSchema,
   paidBy: z.string().min(1).nullable().optional(),
   paidAt: z.string().min(1).optional(),
+  refundReason: z.string(),
+  refundedBy: z.string().min(1).nullable().optional(),
+  refundedAt: z.string().min(1).optional(),
   customerNote: z.string(),
   cancelReason: z.string(),
   cancelledBy: z.string().min(1).nullable().optional(),

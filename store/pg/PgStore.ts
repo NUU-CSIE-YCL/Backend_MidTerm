@@ -47,6 +47,9 @@ interface SeedData {
     paymentStatus?: PaymentStatus;
     paidBy?: string | null;
     paidAt?: string;
+    refundReason?: string;
+    refundedBy?: string | null;
+    refundedAt?: string;
     cancelReason?: string;
     cancelledBy?: string | null;
     cancelledAt?: string;
@@ -74,13 +77,17 @@ function normalizeOrderStatus(value: unknown): OrderStatus {
 }
 
 function normalizePaymentStatus(value: unknown): PaymentStatus {
-  return value === "paid" ? "paid" : "unpaid";
+  return value === "paid" || value === "refunded" ? value : "unpaid";
+}
+
+function canUseCounterService(actorRoles: readonly Role[]): boolean {
+  return actorRoles.some((role) =>
+    role === "staff" || role === "owner" || role === "admin",
+  );
 }
 
 function canCancelOrder(order: Order, actorUserId: string, actorRoles: readonly Role[]): boolean {
-  const canCancelOperationalOrder = actorRoles.some((role) =>
-    role === "staff" || role === "owner" || role === "admin",
-  );
+  const canCancelOperationalOrder = canUseCounterService(actorRoles);
 
   if (canCancelOperationalOrder) {
     return (
@@ -242,6 +249,13 @@ export class PgStore implements Store {
         ? inserted.paidAt instanceof Date
           ? inserted.paidAt.toISOString()
           : new Date(inserted.paidAt).toISOString()
+        : undefined,
+      refundReason: inserted.refundReason ?? "",
+      refundedBy: inserted.refundedBy,
+      refundedAt: inserted.refundedAt
+        ? inserted.refundedAt instanceof Date
+          ? inserted.refundedAt.toISOString()
+          : new Date(inserted.refundedAt).toISOString()
         : undefined,
       customerNote: inserted.customerNote ?? "",
       cancelReason: inserted.cancelReason ?? "",
@@ -493,6 +507,99 @@ export class PgStore implements Store {
     return { ok: true, order };
   }
 
+  async refundOrder(
+    orderId: number,
+    input: { actorUserId: string; actorRoles: readonly Role[]; reason?: string },
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_REFUND_FORBIDDEN"
+          | "ORDER_NOT_REFUNDABLE";
+      }
+  > {
+    const order = this.orders.find((o) => o.id === orderId);
+    if (!order) return { ok: false, code: "ORDER_NOT_FOUND" };
+
+    if (!canUseCounterService(input.actorRoles)) {
+      return { ok: false, code: "ORDER_REFUND_FORBIDDEN" };
+    }
+
+    if (order.status !== "completed" || order.paymentStatus !== "paid") {
+      return { ok: false, code: "ORDER_NOT_REFUNDABLE" };
+    }
+
+    const refundedAt = new Date().toISOString();
+    const refundReason = (input.reason ?? "").trim();
+
+    await db
+      .update(ordersTable)
+      .set({
+        paymentStatus: "refunded",
+        refundReason,
+        refundedBy: input.actorUserId,
+        refundedAt: new Date(refundedAt),
+      })
+      .where(eq(ordersTable.id, orderId));
+
+    order.paymentStatus = "refunded";
+    order.refundReason = refundReason;
+    order.refundedBy = input.actorUserId;
+    order.refundedAt = refundedAt;
+
+    return { ok: true, order };
+  }
+
+  async reopenOrder(
+    orderId: number,
+    input: { actorUserId: string; actorRoles: readonly Role[]; reason?: string },
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_REOPEN_FORBIDDEN"
+          | "ORDER_NOT_REOPENABLE";
+      }
+  > {
+    const order = this.orders.find((o) => o.id === orderId);
+    if (!order) return { ok: false, code: "ORDER_NOT_FOUND" };
+
+    if (!canUseCounterService(input.actorRoles)) {
+      return { ok: false, code: "ORDER_REOPEN_FORBIDDEN" };
+    }
+
+    if (order.status !== "cancelled") {
+      return { ok: false, code: "ORDER_NOT_REOPENABLE" };
+    }
+
+    const submittedAt = new Date().toISOString();
+
+    await db
+      .update(ordersTable)
+      .set({
+        status: "submitted",
+        paymentStatus: "unpaid",
+        cancelReason: "",
+        cancelledBy: null,
+        cancelledAt: null,
+        submittedAt: new Date(submittedAt),
+      })
+      .where(eq(ordersTable.id, orderId));
+
+    order.status = "submitted";
+    order.paymentStatus = "unpaid";
+    order.cancelReason = "";
+    order.cancelledBy = null;
+    order.cancelledAt = undefined;
+    order.submittedAt = submittedAt;
+
+    return { ok: true, order };
+  }
+
   private async seedFromJsonIfEmpty(): Promise<void> {
     const [countRow] = await db
       .select({ value: sql<number>`count(*)` })
@@ -620,6 +727,13 @@ export class PgStore implements Store {
         ? row.paidAt instanceof Date
           ? row.paidAt.toISOString()
           : new Date(row.paidAt).toISOString()
+        : undefined,
+      refundReason: row.refundReason ?? "",
+      refundedBy: row.refundedBy,
+      refundedAt: row.refundedAt
+        ? row.refundedAt instanceof Date
+          ? row.refundedAt.toISOString()
+          : new Date(row.refundedAt).toISOString()
         : undefined,
       customerNote: row.customerNote ?? "",
       cancelReason: row.cancelReason ?? "",

@@ -40,6 +40,7 @@ describe("V10.4C order cancellation contracts", () => {
       cancelReason: "客人臨時取消",
       cancelledBy: "user-1",
       cancelledAt: "2026-06-16T00:02:00.000Z",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       submittedAt: "2026-06-16T00:01:00.000Z",
     });
@@ -60,6 +61,7 @@ describe("V10.4C order cancellation contracts", () => {
       cancelReason: "客人臨時取消",
       cancelledBy: "user-1",
       cancelledAt: "2026-06-16T00:02:00.000Z",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       createdAtTaipei: "2026/06/16 08:00",
       submittedAt: "2026-06-16T00:01:00.000Z",

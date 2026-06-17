@@ -37,6 +37,7 @@ describe("V10.4B order pickup info contracts", () => {
       paymentStatus: "unpaid",
       customerNote: "到店付款",
       cancelReason: "",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       createdAtTaipei: "2026/06/16 08:00",
       pickupCode: "A-0007",
@@ -56,6 +57,7 @@ describe("V10.4B order pickup info contracts", () => {
       paymentStatus: "unpaid",
       customerNote: "",
       cancelReason: "",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       submittedAt: "2026-06-16T00:01:00.000Z",
     });

@@ -6,10 +6,10 @@ import {
 } from "../shared/route-schemas.ts";
 
 describe("V10.4D order payment contracts", () => {
-  test("payment status schema accepts only unpaid and paid", () => {
+  test("payment status schema accepts unpaid, paid, and refunded", () => {
     expect(paymentStatusSchema.safeParse("unpaid").success).toBe(true);
     expect(paymentStatusSchema.safeParse("paid").success).toBe(true);
-    expect(paymentStatusSchema.safeParse("refunded").success).toBe(false);
+    expect(paymentStatusSchema.safeParse("refunded").success).toBe(true);
     expect(paymentStatusSchema.safeParse("pending").success).toBe(false);
   });
 
@@ -25,6 +25,7 @@ describe("V10.4D order payment contracts", () => {
         paidBy: null,
         customerNote: "",
         cancelReason: "",
+        refundReason: "",
         createdAt: "2026-06-16T00:00:00.000Z",
       });
 
@@ -44,6 +45,7 @@ describe("V10.4D order payment contracts", () => {
       paidAt: "2026-06-16T00:05:00.000Z",
       customerNote: "",
       cancelReason: "",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       createdAtTaipei: "2026/06/16 08:00",
       submittedAt: "2026-06-16T00:01:00.000Z",
@@ -67,6 +69,7 @@ describe("V10.4D order payment contracts", () => {
       paidAt: "2026-06-16T00:05:00.000Z",
       customerNote: "",
       cancelReason: "",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       submittedAt: "2026-06-16T00:01:00.000Z",
     });

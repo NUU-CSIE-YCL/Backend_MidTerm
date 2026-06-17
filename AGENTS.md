@@ -264,3 +264,30 @@ git diff --check
 - chef/staff 工作台在其他人操作後會自動更新。
 - staff 完成取餐並收款後，叫號看板在下一輪自動移除該訂單。
 - 手動重新整理按鈕仍可正常使用。
+## 最新交接補充：V10.4G 退款與取消訂單重開
+
+- 使用者已回報 `V10.4F 即時感自動刷新` Render 驗證成功。
+- 本輪實作 `V10.4G 退款與取消訂單重開`：
+  - 新增 migration：`drizzle-v10/0007_v10_refund_reopen_info.sql`
+  - `orders` 新增 `refund_reason`、`refunded_by`、`refunded_at`
+  - `paymentStatus` 擴充為 `unpaid | paid | refunded`
+  - 新增 `PATCH /api/orders/:id/refund`
+  - 新增 `PATCH /api/orders/:id/reopen`
+  - `staff/owner/admin` 可退款 `completed + paid` 訂單
+  - `staff/owner/admin` 可將 `cancelled` 訂單重開為 `submitted`
+  - `customer/chef` 不可退款或重開
+  - 退款不改 `Order.status`，只把 `paymentStatus` 改為 `refunded`
+  - 重開保留 items、total、customerNote、pickupCode，清空取消資訊
+- 前端工作台新增「退款」與「重開訂單」操作，顧客歷史與工作台顯示退款資訊。
+- 本輪驗證建議：
+  - `bun test`
+  - `bun run build`
+  - `bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts tests/v10-order-pickup-info.test.ts tests/v10-order-cancellation.test.ts tests/v10-order-payment.test.ts tests/v10-pickup-board.test.ts tests/v10-auto-refresh.test.ts tests/v10-refund-reopen.test.ts`
+  - `git diff --check`
+- Render 驗證清單：
+  - migration log 出現 `0007_v10_refund_reopen_info`
+  - staff 對 `completed + paid` 訂單退款後，顧客歷史訂單顯示 `已退款`
+  - refunded 訂單不能再退款
+  - staff 對 cancelled 訂單按「重開訂單」後，訂單回到工作台 submitted 狀態
+  - chef 可繼續將重開訂單推進到 preparing/ready
+  - customer/chef 看不到退款或重開操作

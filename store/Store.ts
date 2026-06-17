@@ -24,6 +24,16 @@ export type CancelOrderErrorCode =
   | "ORDER_CANCEL_FORBIDDEN"
   | "ORDER_STATUS_NOT_CANCELLABLE";
 
+export type RefundOrderErrorCode =
+  | "ORDER_NOT_FOUND"
+  | "ORDER_REFUND_FORBIDDEN"
+  | "ORDER_NOT_REFUNDABLE";
+
+export type ReopenOrderErrorCode =
+  | "ORDER_NOT_FOUND"
+  | "ORDER_REOPEN_FORBIDDEN"
+  | "ORDER_NOT_REOPENABLE";
+
 export interface Store {
   init(): Promise<void>;
 
@@ -90,5 +100,25 @@ export interface Store {
     },
   ): Promise<
     { ok: true; order: Order } | { ok: false; code: CancelOrderErrorCode }
+  >;
+  refundOrder(
+    orderId: number,
+    input: {
+      actorUserId: string;
+      actorRoles: readonly Role[];
+      reason?: string;
+    },
+  ): Promise<
+    { ok: true; order: Order } | { ok: false; code: RefundOrderErrorCode }
+  >;
+  reopenOrder(
+    orderId: number,
+    input: {
+      actorUserId: string;
+      actorRoles: readonly Role[];
+      reason?: string;
+    },
+  ): Promise<
+    { ok: true; order: Order } | { ok: false; code: ReopenOrderErrorCode }
   >;
 }

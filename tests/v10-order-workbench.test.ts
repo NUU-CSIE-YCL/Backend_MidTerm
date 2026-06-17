@@ -45,6 +45,7 @@ describe("V10.4A order workbench contracts", () => {
       paymentStatus: "unpaid",
       customerNote: "",
       cancelReason: "",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
     };
 
@@ -72,6 +73,7 @@ describe("V10.4A order workbench contracts", () => {
       paymentStatus: "unpaid",
       customerNote: "",
       cancelReason: "",
+      refundReason: "",
       createdAt: "2026-06-16T00:00:00.000Z",
       createdAtTaipei: "2026/06/16 08:00",
       pickupCode: "A-0002",

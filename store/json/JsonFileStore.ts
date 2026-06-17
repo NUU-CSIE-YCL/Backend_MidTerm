@@ -62,13 +62,17 @@ function normalizeOrderStatus(value: unknown): OrderStatus {
 }
 
 function normalizePaymentStatus(value: unknown): PaymentStatus {
-  return value === "paid" ? "paid" : "unpaid";
+  return value === "paid" || value === "refunded" ? value : "unpaid";
+}
+
+function canUseCounterService(actorRoles: readonly Role[]): boolean {
+  return actorRoles.some((role) =>
+    role === "staff" || role === "owner" || role === "admin",
+  );
 }
 
 function canCancelOrder(order: Order, actorUserId: string, actorRoles: readonly Role[]): boolean {
-  const canCancelOperationalOrder = actorRoles.some((role) =>
-    role === "staff" || role === "owner" || role === "admin",
-  );
+  const canCancelOperationalOrder = canUseCounterService(actorRoles);
 
   if (canCancelOperationalOrder) {
     return (
@@ -260,6 +264,12 @@ export class JsonFileStore implements Store {
             typeof order.paidBy === "string" ? order.paidBy : null,
           paidAt:
             typeof order.paidAt === "string" ? order.paidAt : undefined,
+          refundReason:
+            typeof order.refundReason === "string" ? order.refundReason : "",
+          refundedBy:
+            typeof order.refundedBy === "string" ? order.refundedBy : null,
+          refundedAt:
+            typeof order.refundedAt === "string" ? order.refundedAt : undefined,
           cancelReason:
             typeof order.cancelReason === "string" ? order.cancelReason : "",
           cancelledBy:
@@ -440,6 +450,8 @@ export class JsonFileStore implements Store {
       status: "pending",
       paymentStatus: "unpaid",
       paidBy: null,
+      refundReason: "",
+      refundedBy: null,
       customerNote: "",
       cancelReason: "",
       cancelledBy: null,
@@ -642,6 +654,78 @@ export class JsonFileStore implements Store {
     order.cancelReason = (input.reason ?? "").trim();
     order.cancelledBy = input.actorUserId;
     order.cancelledAt = new Date().toISOString();
+    await this.persist();
+
+    return { ok: true, order };
+  }
+
+  async refundOrder(
+    orderId: number,
+    input: { actorUserId: string; actorRoles: readonly Role[]; reason?: string },
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_REFUND_FORBIDDEN"
+          | "ORDER_NOT_REFUNDABLE";
+      }
+  > {
+    const order = this.orders.find((targetOrder) => targetOrder.id === orderId);
+    if (!order) {
+      return { ok: false, code: "ORDER_NOT_FOUND" };
+    }
+
+    if (!canUseCounterService(input.actorRoles)) {
+      return { ok: false, code: "ORDER_REFUND_FORBIDDEN" };
+    }
+
+    if (order.status !== "completed" || order.paymentStatus !== "paid") {
+      return { ok: false, code: "ORDER_NOT_REFUNDABLE" };
+    }
+
+    order.paymentStatus = "refunded";
+    order.refundReason = (input.reason ?? "").trim();
+    order.refundedBy = input.actorUserId;
+    order.refundedAt = new Date().toISOString();
+    await this.persist();
+
+    return { ok: true, order };
+  }
+
+  async reopenOrder(
+    orderId: number,
+    input: { actorUserId: string; actorRoles: readonly Role[]; reason?: string },
+  ): Promise<
+    | { ok: true; order: Order }
+    | {
+        ok: false;
+        code:
+          | "ORDER_NOT_FOUND"
+          | "ORDER_REOPEN_FORBIDDEN"
+          | "ORDER_NOT_REOPENABLE";
+      }
+  > {
+    const order = this.orders.find((targetOrder) => targetOrder.id === orderId);
+    if (!order) {
+      return { ok: false, code: "ORDER_NOT_FOUND" };
+    }
+
+    if (!canUseCounterService(input.actorRoles)) {
+      return { ok: false, code: "ORDER_REOPEN_FORBIDDEN" };
+    }
+
+    if (order.status !== "cancelled") {
+      return { ok: false, code: "ORDER_NOT_REOPENABLE" };
+    }
+
+    order.status = "submitted";
+    order.paymentStatus = "unpaid";
+    order.cancelReason = "";
+    order.cancelledBy = null;
+    order.cancelledAt = undefined;
+    order.submittedAt = new Date().toISOString();
     await this.persist();
 
     return { ok: true, order };

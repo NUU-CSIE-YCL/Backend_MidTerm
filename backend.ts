@@ -31,6 +31,10 @@ import {
   roleRequestListResponseSchema,
   roleRequestResponseSchema,
   roleAuditLogListResponseSchema,
+  refundOrderBodySchema,
+  refundOrderParamsSchema,
+  reopenOrderBodySchema,
+  reopenOrderParamsSchema,
   submitOrderBodySchema,
   submitOrderParamsSchema,
   toPickupBoardOrder,
@@ -1187,6 +1191,118 @@ app.patch(
       summary: "Cancel an order",
       description:
         "Cancel a submitted order by its customer, or an operational order by staff, owner, or admin.",
+    },
+    response: {
+      200: orderResponseEnvelopeSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
+      409: apiErrorResponseSchema,
+      500: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.patch(
+  "/api/orders/:id/refund",
+  async ({ params, body, request, set }) => {
+    const user = await requireUser(request);
+    if (!hasAnyRole(user, counterWorkflowRoles)) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+
+    const orderId = parseInt(params.id, 10);
+    const refundBody = (body ?? {}) as { reason?: string };
+    const result = await store.refundOrder(orderId, {
+      actorUserId: user.id,
+      actorRoles: user.roles,
+      reason: refundBody.reason,
+    });
+
+    if (result.ok === true) {
+      return { data: toOrderResponse(result.order) };
+    }
+
+    switch (result.code) {
+      case "ORDER_NOT_FOUND":
+        set.status = 404;
+        return { error: "Order not found" };
+      case "ORDER_REFUND_FORBIDDEN":
+        set.status = 403;
+        return { error: "Forbidden" };
+      case "ORDER_NOT_REFUNDABLE":
+        set.status = 409;
+        return { error: "Order is not refundable" };
+      default:
+        set.status = 500;
+        return { error: "Unknown order refund error" };
+    }
+  },
+  {
+    params: refundOrderParamsSchema,
+    body: refundOrderBodySchema,
+    detail: {
+      tags: ["orders"],
+      summary: "Refund a completed order",
+      description:
+        "Refund a completed and paid order without changing the order status.",
+    },
+    response: {
+      200: orderResponseEnvelopeSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
+      409: apiErrorResponseSchema,
+      500: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.patch(
+  "/api/orders/:id/reopen",
+  async ({ params, body, request, set }) => {
+    const user = await requireUser(request);
+    if (!hasAnyRole(user, counterWorkflowRoles)) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+
+    const orderId = parseInt(params.id, 10);
+    const reopenBody = (body ?? {}) as { reason?: string };
+    const result = await store.reopenOrder(orderId, {
+      actorUserId: user.id,
+      actorRoles: user.roles,
+      reason: reopenBody.reason,
+    });
+
+    if (result.ok === true) {
+      return { data: toOrderResponse(result.order) };
+    }
+
+    switch (result.code) {
+      case "ORDER_NOT_FOUND":
+        set.status = 404;
+        return { error: "Order not found" };
+      case "ORDER_REOPEN_FORBIDDEN":
+        set.status = 403;
+        return { error: "Forbidden" };
+      case "ORDER_NOT_REOPENABLE":
+        set.status = 409;
+        return { error: "Order is not reopenable" };
+      default:
+        set.status = 500;
+        return { error: "Unknown order reopen error" };
+    }
+  },
+  {
+    params: reopenOrderParamsSchema,
+    body: reopenOrderBodySchema,
+    detail: {
+      tags: ["orders"],
+      summary: "Reopen a cancelled order",
+      description:
+        "Move a cancelled order back to the submitted workbench flow.",
     },
     response: {
       200: orderResponseEnvelopeSchema,
