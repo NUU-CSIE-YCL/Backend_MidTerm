@@ -232,3 +232,35 @@ git diff --check
 - customer 在「我的訂單歷史」看到 ready 取餐提示。
 - staff 點「完成取餐並收款」後，看板移除該訂單。
 - `GET /api/orders/pickup-board` 不回傳個資、備註、餐點、金額或付款資訊。
+
+## V10.4F 交接更新
+
+- 使用者已回報 `V10.4E 取餐叫號看板與顧客狀態提示` Render 驗證成功。
+- 本輪正在實作 `V10.4F 即時感自動刷新`。
+- 本輪不新增 migration、不導入 WebSocket、不改訂單狀態規則。
+
+### V10.4F 範圍
+
+- 新增自動刷新策略工具：`shared/auto-refresh.ts`
+- 取餐叫號看板每 10 秒自動刷新。
+- 已登入使用者每 15 秒自動刷新目前購物車與我的訂單歷史。
+- `staff/chef/owner/admin` 每 10 秒自動刷新訂單工作台。
+- admin RBAC 管理列表、角色申請列表、審計紀錄不自動刷新。
+- 使用者正在送出訂單、清空購物車、更新訂單狀態或取消訂單時，polling 會跳過該輪，避免覆蓋操作中狀態。
+
+### V10.4F 本機驗證命令
+
+```bash
+bun test
+bun run build
+bunx tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target esnext --jsx react-jsx --allowImportingTsExtensions backend.ts frontend/src/App.tsx tests/v10-menu-versioning.test.ts tests/v10-rbac.test.ts tests/v10-role-requests.test.ts tests/v10-admin-users.test.ts tests/v10-role-audit-logs.test.ts tests/v10-order-workbench.test.ts tests/v10-order-pickup-info.test.ts tests/v10-order-cancellation.test.ts tests/v10-order-payment.test.ts tests/v10-pickup-board.test.ts tests/v10-auto-refresh.test.ts
+git diff --check
+```
+
+### V10.4F Render 驗證清單
+
+- 未登入訪客停留在首頁，取餐叫號看板會自動刷新。
+- customer 登入後，其他角色把訂單推進到 `ready`，顧客歷史訂單可在下一輪自動看到 ready 提示。
+- chef/staff 工作台在其他人操作後會自動更新。
+- staff 完成取餐並收款後，叫號看板在下一輪自動移除該訂單。
+- 手動重新整理按鈕仍可正常使用。

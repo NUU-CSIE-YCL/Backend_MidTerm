@@ -6,6 +6,12 @@ import {
   type FormEvent,
 } from "react";
 import "./App.css";
+import {
+  CUSTOMER_ORDER_REFRESH_INTERVAL_MS,
+  PICKUP_BOARD_REFRESH_INTERVAL_MS,
+  WORKBENCH_REFRESH_INTERVAL_MS,
+  getAutoRefreshTargets,
+} from "../../shared/auto-refresh.ts";
 import type {
   AdminUser,
   ApiDataResponse,
@@ -409,8 +415,8 @@ export default function App() {
     return currentOrder;
   }
 
-  async function loadOrderHistory(): Promise<void> {
-    setHistoryLoading(true);
+  async function loadOrderHistory(showLoading = true): Promise<void> {
+    if (showLoading) setHistoryLoading(true);
 
     try {
       const response = await fetch(buildApiUrl("/api/orders/history"), {
@@ -424,14 +430,14 @@ export default function App() {
       const payload = (await response.json()) as ApiDataResponse<AppOrder[]>;
       setHistoryOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
-      setHistoryLoading(false);
+      if (showLoading) setHistoryLoading(false);
     }
   }
 
-  async function loadWorkbenchOrders(): Promise<void> {
+  async function loadWorkbenchOrders(showLoading = true): Promise<void> {
     if (!user || !hasAnyRole(user, orderViewerRoles)) return;
 
-    setWorkbenchLoading(true);
+    if (showLoading) setWorkbenchLoading(true);
     try {
       const response = await fetch(buildApiUrl("/api/orders/workbench"), {
         credentials: "include",
@@ -453,13 +459,15 @@ export default function App() {
       const payload = (await response.json()) as ApiDataResponse<AppOrder[]>;
       setWorkbenchOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
-      setWorkbenchLoading(false);
+      if (showLoading) setWorkbenchLoading(false);
     }
   }
 
-  async function loadPickupBoardOrders(): Promise<void> {
-    setPickupBoardLoading(true);
-    setPickupBoardError("");
+  async function loadPickupBoardOrders(showLoading = true): Promise<void> {
+    if (showLoading) {
+      setPickupBoardLoading(true);
+      setPickupBoardError("");
+    }
 
     try {
       const response = await fetch(buildApiUrl("/api/orders/pickup-board"));
@@ -473,12 +481,12 @@ export default function App() {
       >;
       setPickupBoardOrders(Array.isArray(payload?.data) ? payload.data : []);
     } finally {
-      setPickupBoardLoading(false);
+      if (showLoading) setPickupBoardLoading(false);
     }
   }
 
-  async function refreshUserOrders(): Promise<void> {
-    await Promise.all([loadCurrentOrder(), loadOrderHistory()]);
+  async function refreshUserOrders(showLoading = true): Promise<void> {
+    await Promise.all([loadCurrentOrder(), loadOrderHistory(showLoading)]);
   }
 
   async function refreshCurrentUser(): Promise<SessionUser | null> {
@@ -749,6 +757,59 @@ export default function App() {
       });
     }
   }, [user]);
+
+  const autoRefreshTargets = getAutoRefreshTargets(user);
+  const isOrderMutationInProgress =
+    isSubmittingOrder ||
+    isClearingCart ||
+    updatingWorkbenchOrderId !== null ||
+    cancelingOrderId !== null;
+
+  useEffect(() => {
+    const timerId = window.setInterval(() => {
+      if (isOrderMutationInProgress) return;
+
+      void loadPickupBoardOrders(false).catch((pickupBoardLoadError) => {
+        console.error(pickupBoardLoadError);
+      });
+    }, PICKUP_BOARD_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [isOrderMutationInProgress]);
+
+  useEffect(() => {
+    if (!autoRefreshTargets.customerOrders) return;
+
+    const timerId = window.setInterval(() => {
+      if (isOrderMutationInProgress) return;
+
+      void refreshUserOrders(false).catch((refreshError) => {
+        console.error(refreshError);
+      });
+    }, CUSTOMER_ORDER_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [autoRefreshTargets.customerOrders, isOrderMutationInProgress]);
+
+  useEffect(() => {
+    if (!autoRefreshTargets.workbench) return;
+
+    const timerId = window.setInterval(() => {
+      if (isOrderMutationInProgress) return;
+
+      void loadWorkbenchOrders(false).catch((workbenchLoadError) => {
+        console.error(workbenchLoadError);
+      });
+    }, WORKBENCH_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [autoRefreshTargets.workbench, isOrderMutationInProgress, user]);
 
   const grouped = useMemo(() => {
     const groupedItems = items.reduce(
