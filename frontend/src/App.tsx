@@ -252,6 +252,9 @@ export default function App() {
   const [cartQtyByItemId, setCartQtyByItemId] = useState<
     Record<string, number>
   >({});
+  const [cartItemSnapshotById, setCartItemSnapshotById] = useState<
+    Record<string, MenuItem>
+  >({});
   const [cartTotal, setCartTotal] = useState(0);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
@@ -325,14 +328,23 @@ export default function App() {
       },
       {} as Record<string, number>,
     );
+    const nextItemSnapshotById = order.items.reduce(
+      (acc, orderItem) => {
+        acc[orderItem.item.id] = orderItem.item;
+        return acc;
+      },
+      {} as Record<string, MenuItem>,
+    );
 
     setCartQtyByItemId(nextQtyByItemId);
+    setCartItemSnapshotById(nextItemSnapshotById);
     setCartTotal(order.total);
   }
 
   function resetCartState() {
     setOrderId(null);
     setCartQtyByItemId({});
+    setCartItemSnapshotById({});
     setCartTotal(0);
     setIsCartOpen(false);
   }
@@ -729,7 +741,8 @@ export default function App() {
     return Object.entries(cartQtyByItemId)
       .map(([itemIdText, qty]) => {
         const itemId = itemIdText;
-        const item = itemById.get(itemId);
+        const currentItem = itemById.get(itemId);
+        const item = currentItem ?? cartItemSnapshotById[itemId];
         if (!item || qty <= 0) {
           return null;
         }
@@ -738,11 +751,16 @@ export default function App() {
           itemId,
           qty,
           item,
+          isUnavailable: !currentItem || !item.isCurrentVersion,
           subtotal: item.price * qty,
         };
       })
       .filter((entry) => entry !== null);
-  }, [cartQtyByItemId, items]);
+  }, [cartItemSnapshotById, cartQtyByItemId, items]);
+
+  const hasUnavailableCartItems = cartDetails.some(
+    (detail) => detail.isUnavailable,
+  );
 
   async function ensureOrder(): Promise<number> {
     if (!user) {
@@ -1518,6 +1536,11 @@ export default function App() {
 
   async function submitOrder(): Promise<void> {
     if (!user || orderId === null || cartDetails.length === 0) {
+      return;
+    }
+
+    if (hasUnavailableCartItems) {
+      setActionError("購物車內有舊版或已下架品項，請先移除後再送出。");
       return;
     }
 
@@ -2813,10 +2836,22 @@ export default function App() {
                       className="p-3 rounded-lg bg-base-200 flex items-center justify-between"
                     >
                       <div>
-                        <p className="font-semibold">{detail.item.name}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold">{detail.item.name}</p>
+                          {detail.isUnavailable ? (
+                            <span className="badge badge-warning badge-sm">
+                              舊版/已下架
+                            </span>
+                          ) : null}
+                        </div>
                         <p className="text-sm opacity-70">
                           單價 ${detail.item.price} x {detail.qty}
                         </p>
+                        {detail.isUnavailable ? (
+                          <p className="text-xs text-warning">
+                            此品項已不在目前菜單，請清空後重新加入新版品項。
+                          </p>
+                        ) : null}
                       </div>
                       <p className="font-bold">${detail.subtotal}</p>
                     </li>
@@ -2834,6 +2869,11 @@ export default function App() {
                 <span>總金額</span>
                 <span>${cartTotal}</span>
               </div>
+              {hasUnavailableCartItems ? (
+                <div className="alert alert-warning py-2 text-sm">
+                  <span>購物車含舊版或已下架品項，請先清空後重新加入新版品項。</span>
+                </div>
+              ) : null}
               <label className="form-control">
                 <span className="label-text text-sm">顧客備註</span>
                 <textarea
@@ -2863,7 +2903,11 @@ export default function App() {
                 onClick={() => {
                   void submitOrder();
                 }}
-                disabled={cartDetails.length === 0 || isSubmittingOrder}
+                disabled={
+                  cartDetails.length === 0 ||
+                  hasUnavailableCartItems ||
+                  isSubmittingOrder
+                }
               >
                 {isSubmittingOrder ? "送出中..." : "送出訂單"}
               </button>
