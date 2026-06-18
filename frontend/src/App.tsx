@@ -2312,8 +2312,7 @@ export default function App() {
                 {isGoogleSigningIn ? "導向 Google 中..." : "使用 Google 登入"}
               </button>
             </div>
-            </section>
-          </CollapsibleSection>
+          </section>
         ) : null}
 
         {actionError ? (
@@ -3905,7 +3904,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            </div>
+            </section>
           </CollapsibleSection>
         ) : null}
 
