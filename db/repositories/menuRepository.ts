@@ -10,6 +10,8 @@ export interface CreateVersionedMenuItemInput {
   logical_id?: string;
   name: string;
   price: number;
+  sale_price?: number | null;
+  promotion_label?: string;
   category: string;
   description: string;
   image_url: string;
@@ -22,6 +24,8 @@ export interface CreateVersionedMenuItemInput {
 export interface UpdateVersionedMenuItemInput {
   name?: string;
   price?: number;
+  sale_price?: number | null;
+  promotion_label?: string;
   category?: string;
   description?: string;
   image_url?: string;
@@ -38,6 +42,8 @@ export function toMenuItem(row: MenuRow): MenuItem {
     version: row.version,
     name: row.name,
     price: row.price,
+    salePrice: row.salePrice,
+    promotionLabel: row.promotionLabel,
     category: row.category,
     description: row.description,
     image_url: row.imageUrl,
@@ -61,6 +67,17 @@ function formatLogicalId(value: number): string {
 
 function versionId(logicalId: string, version: number): string {
   return `${logicalId}-${String(version).padStart(2, "0")}`;
+}
+
+function normalizeSalePrice(
+  salePrice: number | null | undefined,
+  price: number,
+): number | null {
+  if (salePrice === undefined || salePrice === null) return null;
+  if (!Number.isInteger(salePrice) || salePrice <= 0 || salePrice >= price) {
+    throw new Error("SALE_PRICE_INVALID");
+  }
+  return salePrice;
 }
 
 export class MenuRepository {
@@ -147,6 +164,8 @@ export class MenuRepository {
           version: 1,
           name: input.name,
           price: input.price,
+          salePrice: normalizeSalePrice(input.sale_price, input.price),
+          promotionLabel: input.promotion_label?.trim() ?? "",
           category: input.category,
           description: input.description,
           imageUrl: input.image_url,
@@ -180,6 +199,11 @@ export class MenuRepository {
         .where(eq(menuItemsTable.id, current.id));
 
       const nextVersion = current.version + 1;
+      const nextPrice = patch.price ?? current.price;
+      const nextSalePrice =
+        patch.sale_price === undefined
+          ? normalizeSalePrice(current.salePrice, nextPrice)
+          : normalizeSalePrice(patch.sale_price, nextPrice);
       const [inserted] = await tx
         .insert(menuItemsTable)
         .values({
@@ -188,7 +212,12 @@ export class MenuRepository {
           logicalId: current.logicalId,
           version: nextVersion,
           name: patch.name ?? current.name,
-          price: patch.price ?? current.price,
+          price: nextPrice,
+          salePrice: nextSalePrice,
+          promotionLabel:
+            patch.promotion_label !== undefined
+              ? patch.promotion_label.trim()
+              : current.promotionLabel,
           category: patch.category ?? current.category,
           description: patch.description ?? current.description,
           imageUrl: patch.image_url ?? current.imageUrl,

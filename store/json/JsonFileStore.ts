@@ -42,7 +42,8 @@ function cloneDefaultMenu(): MenuItem[] {
 
 function calculateOrderTotal(items: OrderItem[]): number {
   return items.reduce((sum, orderItem) => {
-    return sum + orderItem.item.price * orderItem.qty;
+    const unitPrice = orderItem.item.salePrice ?? orderItem.item.price;
+    return sum + unitPrice * orderItem.qty;
   }, 0);
 }
 
@@ -67,6 +68,26 @@ function normalizePaymentStatus(value: unknown): PaymentStatus {
 
 function compareMenuItems(a: MenuItem, b: MenuItem): number {
   return a.displayOrder - b.displayOrder || a.id.localeCompare(b.id);
+}
+
+function normalizeSalePrice(
+  salePrice: number | null | undefined,
+  price: number,
+): number | null {
+  if (salePrice === undefined || salePrice === null) return null;
+  if (!Number.isInteger(salePrice) || salePrice <= 0 || salePrice >= price) {
+    throw new Error("SALE_PRICE_INVALID");
+  }
+  return salePrice;
+}
+
+function normalizeExistingSalePrice(
+  salePrice: number | null | undefined,
+  price: number,
+): number | null {
+  return salePrice === undefined || salePrice === null
+    ? null
+    : normalizeSalePrice(salePrice, price);
 }
 
 function canUseCounterService(actorRoles: readonly Role[]): boolean {
@@ -115,6 +136,8 @@ function createInitialMenuItem(
     version: 1,
     name,
     price,
+    salePrice: null,
+    promotionLabel: "",
     category,
     description,
     image_url,
@@ -162,6 +185,12 @@ function normalizeMenuItem(
     version,
     name: item.name ?? "",
     price: item.price ?? 0,
+    salePrice:
+      typeof item.salePrice === "number" && Number.isFinite(item.salePrice)
+        ? item.salePrice
+        : null,
+    promotionLabel:
+      typeof item.promotionLabel === "string" ? item.promotionLabel : "",
     category: item.category ?? "",
     description: item.description ?? "",
     image_url: item.image_url ?? "",
@@ -330,6 +359,8 @@ export class JsonFileStore implements Store {
     category: string;
     description: string;
     image_url: string;
+    sale_price?: number | null;
+    promotion_label?: string;
     display_order?: number;
     is_sold_out?: boolean;
     is_hidden?: boolean;
@@ -344,6 +375,8 @@ export class JsonFileStore implements Store {
       version: 1,
       name: input.name,
       price: input.price,
+      salePrice: normalizeSalePrice(input.sale_price, input.price),
+      promotionLabel: input.promotion_label?.trim() ?? "",
       category: input.category,
       description: input.description,
       image_url: input.image_url,
@@ -370,6 +403,8 @@ export class JsonFileStore implements Store {
       category?: string;
       description?: string;
       image_url?: string;
+      sale_price?: number | null;
+      promotion_label?: string;
       is_sold_out?: boolean;
       is_hidden?: boolean;
       change_reason?: string;
@@ -383,12 +418,22 @@ export class JsonFileStore implements Store {
     current.isCurrentVersion = false;
 
     const nextVersion = current.version + 1;
+    const nextPrice = patch.price ?? current.price;
+    const nextSalePrice =
+      patch.sale_price === undefined
+        ? normalizeExistingSalePrice(current.salePrice, nextPrice)
+        : normalizeSalePrice(patch.sale_price, nextPrice);
     const nextMenuItem: MenuItem = {
       ...current,
       id: `${current.logicalId}-${String(nextVersion).padStart(2, "0")}`,
       version: nextVersion,
       name: patch.name ?? current.name,
-      price: patch.price ?? current.price,
+      price: nextPrice,
+      salePrice: nextSalePrice,
+      promotionLabel:
+        patch.promotion_label !== undefined
+          ? patch.promotion_label.trim()
+          : current.promotionLabel,
       category: patch.category ?? current.category,
       description: patch.description ?? current.description,
       image_url: patch.image_url ?? current.image_url,

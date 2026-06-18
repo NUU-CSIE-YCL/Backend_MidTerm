@@ -46,6 +46,8 @@ export interface Store {
     category: string;
     description: string;
     image_url: string;
+    sale_price?: number | null;
+    promotion_label?: string;
     display_order?: number;
     is_sold_out?: boolean;
     is_hidden?: boolean;
@@ -59,6 +61,8 @@ export interface Store {
       category?: string;
       description?: string;
       image_url?: string;
+      sale_price?: number | null;
+      promotion_label?: string;
       is_sold_out?: boolean;
       is_hidden?: boolean;
       change_reason?: string;

@@ -43,6 +43,8 @@ export const menuItemSchema = z.object({
   version: z.number().int().min(1),
   name: z.string().min(1),
   price: z.number().min(0),
+  salePrice: z.number().int().min(1).nullable(),
+  promotionLabel: z.string(),
   category: z.string().min(1),
   description: z.string(),
   image_url: z.string().min(1),

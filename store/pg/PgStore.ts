@@ -58,7 +58,10 @@ interface SeedData {
 }
 
 function calculateTotal(items: ReadonlyArray<OrderItem>): number {
-  return items.reduce((sum, oi) => sum + oi.item.price * oi.qty, 0);
+  return items.reduce((sum, oi) => {
+    const unitPrice = oi.item.salePrice ?? oi.item.price;
+    return sum + unitPrice * oi.qty;
+  }, 0);
 }
 
 function normalizeOrderStatus(value: unknown): OrderStatus {
@@ -143,6 +146,8 @@ export class PgStore implements Store {
     category: string;
     description: string;
     image_url: string;
+    sale_price?: number | null;
+    promotion_label?: string;
     display_order?: number;
     is_sold_out?: boolean;
     is_hidden?: boolean;
@@ -162,6 +167,8 @@ export class PgStore implements Store {
       category?: string;
       description?: string;
       image_url?: string;
+      sale_price?: number | null;
+      promotion_label?: string;
       is_sold_out?: boolean;
       is_hidden?: boolean;
       change_reason?: string;
@@ -652,6 +659,8 @@ export class PgStore implements Store {
             version: 1,
             name: item.name,
             price: item.price,
+            salePrice: null,
+            promotionLabel: "",
             category: item.category,
             description: item.description,
             imageUrl: item.image_url,
@@ -694,6 +703,8 @@ export class PgStore implements Store {
         version: menuItemsTable.version,
         name: menuItemsTable.name,
         price: menuItemsTable.price,
+        salePrice: menuItemsTable.salePrice,
+        promotionLabel: menuItemsTable.promotionLabel,
         category: menuItemsTable.category,
         description: menuItemsTable.description,
         imageUrl: menuItemsTable.imageUrl,
@@ -726,6 +737,8 @@ export class PgStore implements Store {
           version: row.version,
           name: row.name,
           price: row.price,
+          salePrice: row.salePrice,
+          promotionLabel: row.promotionLabel,
           category: row.category,
           description: row.description,
           image_url: row.imageUrl,

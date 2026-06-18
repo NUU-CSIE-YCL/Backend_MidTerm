@@ -57,6 +57,10 @@ export const operationsSummaryResponseSchema = z.object({
   data: operationsSummarySchema,
 });
 
+export const ordersCsvQuerySchema = z.object({
+  range: operationsSummaryRangeSchema.optional().default("today"),
+});
+
 // ─── API Layer Order Response（Order 的 API 層呈現）──────────────────────
 
 export const orderResponseSchema = orderSchema.extend({
@@ -108,10 +112,20 @@ export const createMenuItemBodySchema = z.object({
   category: z.string().min(1),
   description: z.string().min(1),
   image_url: z.string().min(1),
+  sale_price: z.number().int().min(1).nullable().optional(),
+  promotion_label: z.string().trim().max(40).optional(),
   display_order: z.number().int().min(0).optional(),
   is_sold_out: z.boolean().optional(),
   is_hidden: z.boolean().optional(),
   change_reason: z.string().min(1).optional(),
+}).superRefine((value, context) => {
+  if (value.sale_price !== undefined && value.sale_price !== null && value.sale_price >= value.price) {
+    context.addIssue({
+      code: "custom",
+      path: ["sale_price"],
+      message: "sale_price must be lower than price",
+    });
+  }
 });
 
 /** PATCH /api/menu/:id */
@@ -125,9 +139,24 @@ export const updateMenuItemBodySchema = z.object({
   category: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
   image_url: z.string().min(1).optional(),
+  sale_price: z.number().int().min(1).nullable().optional(),
+  promotion_label: z.string().trim().max(40).optional(),
   is_sold_out: z.boolean().optional(),
   is_hidden: z.boolean().optional(),
   change_reason: z.string().min(1).optional(),
+}).superRefine((value, context) => {
+  if (
+    value.price !== undefined &&
+    value.sale_price !== undefined &&
+    value.sale_price !== null &&
+    value.sale_price >= value.price
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["sale_price"],
+      message: "sale_price must be lower than price",
+    });
+  }
 });
 
 /** DELETE /api/menu/:id */

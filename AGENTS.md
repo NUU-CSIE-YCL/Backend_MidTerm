@@ -1,5 +1,26 @@
 # AGENTS.md
 
+## 最新交接：V10.5C + V10.6A 合併實作中
+
+- 使用者已回報 `V10.5B 菜單分類與售完/隱藏狀態` Render 驗證成功。
+- 本輪正在實作兩個階段：
+  - `V10.5C 單品特價與折扣價基礎`
+  - `V10.6A 營運報表 CSV 匯出`
+- 本輪資料庫 migration：
+  - `drizzle-v10/0010_v10_menu_sale_price.sql`
+  - `menu_items.sale_price integer null`
+  - `menu_items.promotion_label text not null default ''`
+- 本輪主要 API/contract：
+  - `MenuItem.salePrice`
+  - `MenuItem.promotionLabel`
+  - `POST /api/menu`、`PATCH /api/menu/:id` 可接 `sale_price`、`promotion_label`
+  - `sale_price` 必須大於 0 且低於原價；`null` 代表取消特價
+  - `GET /api/reports/orders.csv?range=today|all`，需要 `staff/owner/admin`
+- 本輪重要驗證：
+  - 特價品項加入購物車與送出訂單時，`total` 使用 `salePrice ?? price`
+  - 舊訂單仍保留當時 menu version 的特價資訊
+  - CSV 匯出不包含 email、roles、OAuth 或其他使用者身份欄位
+
 ## 最新交接補充：V10.5B 菜單分類與售完/隱藏狀態
 
 - 使用者已回報 `V10.5A 菜單顯示排序` Render 驗證成功。

@@ -35,6 +35,8 @@ export const menuItemsTable = appSchema.table(
     category: text("category").notNull(),
     description: text("description").notNull(),
     imageUrl: text("image_url").notNull(),
+    salePrice: integer("sale_price"),
+    promotionLabel: text("promotion_label").notNull().default(""),
     displayOrder: integer("display_order").notNull().default(0),
     isSoldOut: boolean("is_sold_out").notNull().default(false),
     isHidden: boolean("is_hidden").notNull().default(false),

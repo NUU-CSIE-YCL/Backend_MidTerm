@@ -92,10 +92,20 @@ function buildApiUrl(path: string) {
   return `${apiBaseUrl}${path}`;
 }
 
+function getEffectiveMenuPrice(item: MenuItem): number {
+  return item.salePrice ?? item.price;
+}
+
+function hasSalePrice(item: MenuItem): boolean {
+  return item.salePrice !== null && item.salePrice < item.price;
+}
+
 interface MenuFormState {
   logical_id: string;
   name: string;
   price: string;
+  sale_price: string;
+  promotion_label: string;
   category: string;
   description: string;
   image_url: string;
@@ -121,6 +131,8 @@ function createEmptyMenuForm(): MenuFormState {
     logical_id: "",
     name: "",
     price: "",
+    sale_price: "",
+    promotion_label: "",
     category: "",
     description: "",
     image_url: "",
@@ -135,6 +147,8 @@ function createMenuFormFromItem(item: MenuItem): MenuFormState {
     logical_id: item.logicalId,
     name: item.name,
     price: String(item.price),
+    sale_price: item.salePrice === null ? "" : String(item.salePrice),
+    promotion_label: item.promotionLabel,
     category: item.category,
     description: item.description,
     image_url: item.image_url,
@@ -293,6 +307,7 @@ export default function App() {
   const [operationsSummaryLoading, setOperationsSummaryLoading] =
     useState(false);
   const [operationsSummaryError, setOperationsSummaryError] = useState("");
+  const [ordersCsvDownloading, setOrdersCsvDownloading] = useState(false);
   const [pickupBoardOrders, setPickupBoardOrders] = useState<
     PickupBoardOrder[]
   >([]);
@@ -544,6 +559,52 @@ export default function App() {
       setOperationsSummary(payload.data);
     } finally {
       if (showLoading) setOperationsSummaryLoading(false);
+    }
+  }
+
+  async function downloadOrdersCsv(): Promise<void> {
+    if (!user || !hasAnyRole(user, counterWorkflowRoles)) return;
+
+    setOrdersCsvDownloading(true);
+    setOperationsSummaryError("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/reports/orders.csv?range=${operationsSummaryRange}`),
+        { credentials: "include" },
+      );
+
+      if (response.status === 401) {
+        setUser(null);
+        throw new Error("請重新登入後再匯出報表。");
+      }
+
+      if (response.status === 403) {
+        throw new Error("目前角色沒有匯出營運報表權限。");
+      }
+
+      if (!response.ok) {
+        throw new Error(`Export orders CSV failed: HTTP ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `orders-${operationsSummaryRange}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      setOperationsSummaryError(
+        downloadError instanceof Error
+          ? downloadError.message
+          : "匯出 CSV 失敗，請稍後再試。",
+      );
+      console.error(downloadError);
+    } finally {
+      setOrdersCsvDownloading(false);
     }
   }
 
@@ -967,7 +1028,7 @@ export default function App() {
           qty,
           item,
           isUnavailable: !currentItem || !item.isCurrentVersion,
-          subtotal: item.price * qty,
+          subtotal: getEffectiveMenuPrice(item) * qty,
         };
       })
       .filter((entry) => entry !== null);
@@ -1155,10 +1216,23 @@ export default function App() {
       return;
     }
 
+    const trimmedSalePrice = menuForm.sale_price.trim();
+    const salePrice =
+      trimmedSalePrice.length > 0 ? Number(trimmedSalePrice) : null;
+    if (
+      salePrice !== null &&
+      (!Number.isInteger(salePrice) || salePrice <= 0 || salePrice >= price)
+    ) {
+      setMenuAdminError("特價必須是大於 0 且低於原價的整數。");
+      return;
+    }
+
     const isEditing = editingMenuId !== null;
-    const payload: Record<string, string | number | boolean> = {
+    const payload: Record<string, string | number | boolean | null> = {
       name: menuForm.name.trim(),
       price,
+      sale_price: salePrice,
+      promotion_label: menuForm.promotion_label.trim(),
       category: menuForm.category.trim(),
       description: menuForm.description.trim(),
       image_url: menuForm.image_url.trim(),
@@ -2720,6 +2794,16 @@ export default function App() {
                 >
                   {operationsSummaryLoading ? "載入中" : "重新整理"}
                 </button>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  disabled={ordersCsvDownloading}
+                  onClick={() => {
+                    void downloadOrdersCsv();
+                  }}
+                  type="button"
+                >
+                  {ordersCsvDownloading ? "匯出中" : "匯出 CSV"}
+                </button>
               </div>
             </div>
 
@@ -2908,7 +2992,9 @@ export default function App() {
                             <span>
                               {detail.item.name} x {detail.qty}
                             </span>
-                            <span>${detail.item.price * detail.qty}</span>
+                            <span>
+                              ${getEffectiveMenuPrice(detail.item) * detail.qty}
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -3123,6 +3209,33 @@ export default function App() {
                 </label>
 
                 <label className="form-control">
+                  <span className="label-text">特價</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    min="1"
+                    onChange={(event) =>
+                      updateMenuFormField("sale_price", event.target.value)
+                    }
+                    placeholder="留空代表無特價"
+                    type="number"
+                    value={menuForm.sale_price}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">促銷標籤</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    maxLength={40}
+                    onChange={(event) =>
+                      updateMenuFormField("promotion_label", event.target.value)
+                    }
+                    placeholder="例如：今日特價"
+                    value={menuForm.promotion_label}
+                  />
+                </label>
+
+                <label className="form-control">
                   <span className="label-text">分類</span>
                   <input
                     className="input input-bordered input-sm"
@@ -3294,7 +3407,20 @@ export default function App() {
                                 </span>
                               </div>
                             </td>
-                            <td>${item.price}</td>
+                            <td>
+                              {hasSalePrice(item) ? (
+                                <div className="space-y-1">
+                                  <div className="text-xs line-through opacity-60">
+                                    原價 ${item.price}
+                                  </div>
+                                  <div className="font-bold text-success">
+                                    特價 ${item.salePrice}
+                                  </div>
+                                </div>
+                              ) : (
+                                <>${item.price}</>
+                              )}
+                            </td>
                             <td>
                               <div className="flex flex-wrap gap-1">
                               {item.version > 1 ? (
@@ -3439,6 +3565,11 @@ export default function App() {
                           <span className="badge badge-info">
                             v{item.version}
                           </span>
+                          {hasSalePrice(item) ? (
+                            <span className="badge badge-success">
+                              {item.promotionLabel || "特價"}
+                            </span>
+                          ) : null}
                           {item.isSoldOut ? (
                             <span className="badge badge-error">售完</span>
                           ) : null}
@@ -3456,9 +3587,22 @@ export default function App() {
                         {item.description}
                       </p>
                       <div className="card-actions justify-between items-center">
-                        <span className="text-xl font-bold text-success">
-                          ${item.price}
-                        </span>
+                        <div>
+                          {hasSalePrice(item) ? (
+                            <>
+                              <p className="text-xs line-through opacity-60">
+                                原價 ${item.price}
+                              </p>
+                              <p className="text-xl font-bold text-success">
+                                ${item.salePrice}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-xl font-bold text-success">
+                              ${item.price}
+                            </p>
+                          )}
+                        </div>
                         <button
                           className="btn btn-sm btn-primary"
                           onClick={() => {
@@ -3624,7 +3768,8 @@ export default function App() {
                           ) : null}
                         </div>
                         <p className="text-sm opacity-70">
-                          單價 ${detail.item.price} x {detail.qty}
+                          單價 ${getEffectiveMenuPrice(detail.item)} x{" "}
+                          {detail.qty}
                         </p>
                         {detail.isUnavailable ? (
                           <p className="text-xs text-warning">

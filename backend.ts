@@ -24,6 +24,7 @@ import {
   menuListResponseSchema,
   nullableOrderResponseEnvelopeSchema,
   orderListResponseSchema,
+  ordersCsvQuerySchema,
   operationsSummaryQuerySchema,
   operationsSummaryResponseSchema,
   orderResponseEnvelopeSchema,
@@ -176,6 +177,63 @@ function createOperationsSummary(
     unpaidAmount,
     byStatus,
   };
+}
+
+function escapeCsvField(value: string | number | null | undefined): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function createOrdersCsv(
+  orders: readonly Order[],
+  range: OperationsSummaryRange,
+): string {
+  const todayKey = getTaipeiDateKey(new Date().toISOString());
+  const headers = [
+    "orderId",
+    "pickupCode",
+    "status",
+    "paymentStatus",
+    "total",
+    "itemCount",
+    "itemSummary",
+    "createdAt",
+    "submittedAt",
+    "paidAt",
+    "refundedAt",
+    "cancelledAt",
+  ];
+  const rows = orders
+    .filter((order) => order.status !== "pending")
+    .filter((order) =>
+      range === "today" ? getTaipeiDateKey(order.createdAt) === todayKey : true,
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((order) => {
+      const itemCount = order.items.reduce((sum, item) => sum + item.qty, 0);
+      const itemSummary = order.items
+        .map((item) => `${item.item.name} x ${item.qty}`)
+        .join("; ");
+
+      return [
+        order.id,
+        `A-${String(order.id).padStart(4, "0")}`,
+        order.status,
+        order.paymentStatus,
+        order.total,
+        itemCount,
+        itemSummary,
+        order.createdAt,
+        order.submittedAt,
+        order.paidAt,
+        order.refundedAt,
+        order.cancelledAt,
+      ]
+        .map(escapeCsvField)
+        .join(",");
+    });
+
+  return [headers.join(","), ...rows].join("\r\n");
 }
 
 // ─── Auth Helper ──────────────────────────────────────────────────────────────
@@ -905,9 +963,18 @@ app.post(
   "/api/menu",
   async ({ body, request, set }) => {
     await requireUserWithAnyRole(request, menuManagerRoles);
-    const newMenuItem = await store.createMenuItem(
-      body as Parameters<typeof store.createMenuItem>[0],
-    );
+    let newMenuItem;
+    try {
+      newMenuItem = await store.createMenuItem(
+        body as Parameters<typeof store.createMenuItem>[0],
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === "SALE_PRICE_INVALID") {
+        set.status = 400;
+        return { error: "Sale price must be lower than price" };
+      }
+      throw error;
+    }
     set.status = 201;
     return { data: newMenuItem };
   },
@@ -920,6 +987,7 @@ app.post(
     },
     response: {
       201: menuItemResponseSchema,
+      400: apiErrorResponseSchema,
       401: apiErrorResponseSchema,
       403: apiErrorResponseSchema,
     },
@@ -988,7 +1056,16 @@ app.patch(
   "/api/menu/:id",
   async ({ params, body, request, set }) => {
     await requireUserWithAnyRole(request, menuManagerRoles);
-    const menuItem = await store.updateMenuItem(params.id, body);
+    let menuItem;
+    try {
+      menuItem = await store.updateMenuItem(params.id, body);
+    } catch (error) {
+      if (error instanceof Error && error.message === "SALE_PRICE_INVALID") {
+        set.status = 400;
+        return { error: "Sale price must be lower than price" };
+      }
+      throw error;
+    }
 
     if (!menuItem) {
       set.status = 404;
@@ -1007,6 +1084,7 @@ app.patch(
     },
     response: {
       200: menuItemResponseSchema,
+      400: apiErrorResponseSchema,
       401: apiErrorResponseSchema,
       403: apiErrorResponseSchema,
       404: apiErrorResponseSchema,
@@ -1115,6 +1193,39 @@ app.get(
     },
     response: {
       200: operationsSummaryResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/reports/orders.csv",
+  async ({ query, request }) => {
+    await requireUserWithAnyRole(request, counterWorkflowRoles);
+    const csvQuery = query as { range?: OperationsSummaryRange };
+    const range = csvQuery.range ?? "today";
+    const csv = createOrdersCsv(store.getOrders(), range);
+    const filename = `orders-${range}-${getTaipeiDateKey(
+      new Date().toISOString(),
+    )}.csv`;
+
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  },
+  {
+    query: ordersCsvQuerySchema,
+    detail: {
+      tags: ["orders"],
+      summary: "Export orders CSV",
+      description:
+        "Export non-pending orders as CSV for staff, owner, and admin users.",
+    },
+    response: {
       401: apiErrorResponseSchema,
       403: apiErrorResponseSchema,
     },

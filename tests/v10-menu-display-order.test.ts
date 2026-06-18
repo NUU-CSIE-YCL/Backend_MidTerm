@@ -16,6 +16,8 @@ function menuItem(id: string, displayOrder: number) {
     version: Number.parseInt(id.split("-")[1] ?? "1", 10),
     name: `Item ${id}`,
     price: 50,
+    salePrice: null,
+    promotionLabel: "",
     category: "餐點",
     description: "Test item",
     image_url: "/imgs/menu/test.webp",
