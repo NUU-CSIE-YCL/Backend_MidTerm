@@ -68,6 +68,10 @@ export const menuExperimentListResponseSchema = z.object({
   data: z.array(menuExperimentSchema),
 });
 
+export const experimentedMenuQuerySchema = z.object({
+  visitorKey: z.string().trim().min(1).max(120),
+});
+
 export const ordersCsvQuerySchema = z.object({
   range: operationsSummaryRangeSchema.optional().default("today"),
 });

@@ -1,5 +1,37 @@
 # AGENTS.md
 
+## 最新交接摘要：V10.3G + V10.3E
+
+- 使用者已回報上一輪 `V10.3 菜單版本化進階功能` 已通過 Render 驗證，但前端管理區仍有部分英文文案。
+- 本輪目標：
+  - `V10.3G 管理介面中文化與收合體驗`
+  - `V10.3E A/B 測試穩定分流最小切片`
+- 已新增 `GET /api/menu/experimented?visitorKey=<string>`：
+  - 公開可讀。
+  - 使用 `shared/menu-experiments.ts` 的穩定 hash 分流。
+  - 同一 `visitorKey + experimentKey` 會得到同一 variant。
+  - 無 A/B metadata 的品項照常顯示。
+  - 不改既有 `GET /api/menu`。
+- 前端公開菜單已改為優先呼叫 experimented menu；失敗時 fallback 到 `GET /api/menu`。
+- 前端新增 `CollapsibleSection`，並開始套用在管理/營運區塊：
+  - 角色與權限管理
+  - 營運摘要
+  - 訂單工作台
+  - 菜單管理
+  - 價格分析與 A/B 測試
+- 前端 V10.3 進階區英文文案已改為中文：
+  - version level/note
+  - price analysis
+  - A/B experiments
+  - loading/refresh/variant/orders/qty/revenue 等主要顯示字串
+- 新增測試：
+  - `tests/v10-menu-experiment-split.test.ts`
+- 注意：本輪進行中途工具因 usage limit 無法執行 `bun run build` / `bun test`。下一個 session 或額度恢復後，請優先跑：
+  - `bun run build`
+  - `bun test`
+  - TypeScript 入口檢查，加入 `tests/v10-menu-experiment-split.test.ts`
+  - `git diff --check`
+
 ## 最新交接摘要：V10.3 菜單版本化進階功能
 
 - 使用者已回報 `V10.5C 單品特價與折扣價基礎`、`V10.6A 營運報表 CSV 匯出` 已通過 Render 驗證。

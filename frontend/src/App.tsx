@@ -4,6 +4,7 @@ import {
   useState,
   useMemo,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import "./App.css";
 import {
@@ -37,6 +38,7 @@ import { hasAnyRole, normalizeRoles } from "../../shared/guards.ts";
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const fallbackImageUrl =
   "https://images.unsplash.com/photo-1526318896980-cf78c088247c?auto=format&fit=crop&w=800&q=80";
+const experimentVisitorKeyStorageKey = "bf1042_experiment_visitor_key";
 const menuManagerRoles = ["owner", "admin"] as const satisfies readonly Role[];
 const adminRoles = ["admin"] as const satisfies readonly Role[];
 const orderViewerRoles = [
@@ -48,6 +50,26 @@ const orderViewerRoles = [
 const kitchenWorkflowRoles = ["chef", "owner", "admin"] as const satisfies readonly Role[];
 const counterWorkflowRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
 const orderCancellationRoles = ["staff", "owner", "admin"] as const satisfies readonly Role[];
+
+function createExperimentVisitorKey(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `visitor-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getExperimentVisitorKey(): string {
+  try {
+    const existingKey = localStorage.getItem(experimentVisitorKeyStorageKey);
+    if (existingKey) return existingKey;
+
+    const nextKey = createExperimentVisitorKey();
+    localStorage.setItem(experimentVisitorKeyStorageKey, nextKey);
+    return nextKey;
+  } catch {
+    return createExperimentVisitorKey();
+  }
+}
 const roleOptions = [
   "customer",
   "staff",
@@ -301,6 +323,43 @@ function MenuImagePreview({ imageUrl }: { imageUrl: string }) {
   );
 }
 
+function CollapsibleSection({
+  title,
+  description,
+  defaultOpen = false,
+  className = "",
+  children,
+}: {
+  title: string;
+  description?: string;
+  defaultOpen?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <section className={className}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+        <div>
+          <h2 className="text-xl font-bold">{title}</h2>
+          {description ? (
+            <p className="text-sm opacity-70">{description}</p>
+          ) : null}
+        </div>
+        <button
+          className="btn btn-sm btn-outline"
+          onClick={() => setIsOpen((current) => !current)}
+          type="button"
+        >
+          {isOpen ? "收合" : "展開"}
+        </button>
+      </div>
+      <div className={isOpen ? "" : "hidden"}>{children}</div>
+    </section>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [authError, setAuthError] = useState("");
@@ -443,6 +502,21 @@ export default function App() {
   }
 
   async function fetchMenuItems(): Promise<MenuItem[]> {
+    try {
+      const visitorKey = encodeURIComponent(getExperimentVisitorKey());
+      const response = await fetch(
+        buildApiUrl(`/api/menu/experimented?visitorKey=${visitorKey}`),
+      );
+      if (!response.ok) return await fetchPublicMenuItems();
+
+      const payload = (await response.json()) as ApiDataResponse<MenuItem[]>;
+      return Array.isArray(payload?.data) ? payload.data : [];
+    } catch {
+      return await fetchPublicMenuItems();
+    }
+  }
+
+  async function fetchPublicMenuItems(): Promise<MenuItem[]> {
     const response = await fetch(buildApiUrl("/api/menu"));
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -1237,7 +1311,7 @@ export default function App() {
         [item.logicalId]: payload.data,
       }));
     } catch (analysisError) {
-      setMenuAdminError("Price analysis failed. Please try again.");
+      setMenuAdminError("價格分析載入失敗，請稍後再試。");
       console.error(analysisError);
     } finally {
       setPriceAnalysisLoadingId(null);
@@ -1253,12 +1327,12 @@ export default function App() {
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error(`Load menu experiments failed: HTTP ${response.status}`);
+        throw new Error(`載入 A/B 測試摘要失敗：HTTP ${response.status}`);
       }
       const payload = (await response.json()) as ApiDataResponse<MenuExperiment[]>;
       setMenuExperiments(Array.isArray(payload?.data) ? payload.data : []);
     } catch (experimentError) {
-      setMenuAdminError("A/B experiment summary failed. Please try again.");
+      setMenuAdminError("A/B 測試摘要載入失敗，請稍後再試。");
       console.error(experimentError);
     } finally {
       if (showLoading) setMenuExperimentsLoading(false);
@@ -2238,7 +2312,8 @@ export default function App() {
                 {isGoogleSigningIn ? "導向 Google 中..." : "使用 Google 登入"}
               </button>
             </div>
-          </section>
+            </section>
+          </CollapsibleSection>
         ) : null}
 
         {actionError ? (
@@ -2248,7 +2323,13 @@ export default function App() {
         ) : null}
 
         {user ? (
-          <section className="mb-8 grid gap-4 lg:grid-cols-2">
+          <CollapsibleSection
+            className="mb-8"
+            defaultOpen={false}
+            description="角色申請、審核、使用者角色與異動紀錄。"
+            title="角色與權限管理"
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
               <div className="mb-3">
                 <h2 className="text-xl font-bold">角色申請</h2>
@@ -2776,7 +2857,8 @@ export default function App() {
                 )}
               </div>
             ) : null}
-          </section>
+            </div>
+          </CollapsibleSection>
         ) : null}
 
         <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
@@ -2834,7 +2916,13 @@ export default function App() {
         </section>
 
         {canViewOperationsSummary ? (
-          <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+          <CollapsibleSection
+            className="mb-8"
+            defaultOpen
+            description="查看營收、訂單狀態與 CSV 匯出。"
+            title="營運摘要"
+          >
+            <section className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-bold">營運摘要</h2>
@@ -2972,11 +3060,18 @@ export default function App() {
                 <span>尚無摘要資料</span>
               </div>
             )}
-          </section>
+            </section>
+          </CollapsibleSection>
         ) : null}
 
         {canViewOrderWorkbench ? (
-          <section className="mb-8 rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+          <CollapsibleSection
+            className="mb-8"
+            defaultOpen
+            description="處理製作、完成取餐、取消、退款與重開。"
+            title="訂單工作台"
+          >
+            <section className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-bold">訂單工作台</h2>
@@ -3197,11 +3292,18 @@ export default function App() {
                 })}
               </div>
             )}
-          </section>
+            </section>
+          </CollapsibleSection>
         ) : null}
 
         {canManageMenu ? (
-          <section className="mb-8 rounded-lg border border-base-300 bg-base-100 shadow-sm">
+          <CollapsibleSection
+            className="mb-8"
+            defaultOpen
+            description="新增、編輯、下架、排序與版本管理。"
+            title="菜單管理"
+          >
+            <section className="rounded-lg border border-base-300 bg-base-100 shadow-sm">
             <div className="border-b border-base-300 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -3366,7 +3468,7 @@ export default function App() {
                 </label>
 
                 <label className="form-control">
-                  <span className="label-text">Version level</span>
+                  <span className="label-text">版本層級</span>
                   <select
                     className="select select-bordered select-sm"
                     onChange={(event) =>
@@ -3377,39 +3479,39 @@ export default function App() {
                     }
                     value={menuForm.version_level}
                   >
-                    <option value="minor">minor</option>
-                    <option value="major">major</option>
+                    <option value="minor">小改版 minor</option>
+                    <option value="major">大改版 major</option>
                   </select>
                 </label>
 
                 <label className="form-control">
-                  <span className="label-text">Version note</span>
+                  <span className="label-text">版本備註</span>
                   <input
                     className="input input-bordered input-sm"
                     maxLength={120}
                     onChange={(event) =>
                       updateMenuFormField("version_note", event.target.value)
                     }
-                    placeholder="recipe, size, or price note"
+                    placeholder="例如：配方、份量或價格調整"
                     value={menuForm.version_note}
                   />
                 </label>
 
                 <label className="form-control">
-                  <span className="label-text">A/B test key</span>
+                  <span className="label-text">A/B 測試代碼</span>
                   <input
                     className="input input-bordered input-sm"
                     maxLength={80}
                     onChange={(event) =>
                       updateMenuFormField("experiment_key", event.target.value)
                     }
-                    placeholder="toast-copy-2026"
+                    placeholder="例如：toast-copy-2026"
                     value={menuForm.experiment_key}
                   />
                 </label>
 
                 <label className="form-control">
-                  <span className="label-text">A/B variant</span>
+                  <span className="label-text">A/B 版本</span>
                   <input
                     className="input input-bordered input-sm"
                     maxLength={40}
@@ -3419,7 +3521,7 @@ export default function App() {
                         event.target.value,
                       )
                     }
-                    placeholder="A or B"
+                    placeholder="例如：A 或 B"
                     value={menuForm.experiment_variant}
                   />
                 </label>
@@ -3602,8 +3704,8 @@ export default function App() {
                                   type="button"
                                 >
                                   {priceAnalysisLoadingId === item.logicalId
-                                    ? "Loading"
-                                    : "Price analysis"}
+                                    ? "分析中"
+                                    : "價格分析"}
                                 </button>
                                 <button
                                   className="btn btn-xs"
@@ -3678,22 +3780,28 @@ export default function App() {
                 </table>
               </div>
             </div>
-          </section>
+            </section>
+          </CollapsibleSection>
         ) : null}
 
         {user && hasAnyRole(user, menuManagerRoles) ? (
-          <section className="mb-8 grid gap-4 lg:grid-cols-2">
+          <CollapsibleSection
+            className="mb-8"
+            defaultOpen={false}
+            description="查看不同版本價格表現與 A/B 測試彙整。"
+            title="價格分析與 A/B 測試"
+          >
+            <section className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-lg font-bold">Price analysis</h2>
+                <h2 className="text-lg font-bold">價格敏感度分析</h2>
                 {priceAnalysisLoadingId ? (
                   <span className="loading loading-spinner loading-sm" />
                 ) : null}
               </div>
               {Object.values(priceAnalysisByLogicalId).length === 0 ? (
                 <p className="text-sm opacity-70">
-                  Select Price analysis in menu management to compare sales by
-                  version and price.
+                  請在菜單管理列表點選「價格分析」，查看各版本價格與銷售表現。
                 </p>
               ) : (
                 <div className="space-y-4">
@@ -3704,19 +3812,19 @@ export default function App() {
                     >
                       <div className="mb-2 font-semibold">{analysis.name}</div>
                       <div className="mb-2 text-xs opacity-70">
-                        {analysis.logicalId} · orders {analysis.totalOrderCount} ·
-                        qty {analysis.totalQuantitySold} · revenue $
+                        {analysis.logicalId} · 訂單 {analysis.totalOrderCount} ·
+                        份數 {analysis.totalQuantitySold} · 營收 $
                         {analysis.totalRevenue}
                       </div>
                       <div className="overflow-x-auto">
                         <table className="table table-xs">
                           <thead>
                             <tr>
-                              <th>Version</th>
-                              <th>Price</th>
-                              <th>Qty</th>
-                              <th>Revenue</th>
-                              <th>Avg</th>
+                              <th>版本</th>
+                              <th>價格</th>
+                              <th>份數</th>
+                              <th>營收</th>
+                              <th>平均</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -3749,7 +3857,7 @@ export default function App() {
 
             <div className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-lg font-bold">A/B experiments</h2>
+                <h2 className="text-lg font-bold">A/B 測試摘要</h2>
                 <button
                   className="btn btn-xs btn-outline"
                   disabled={menuExperimentsLoading}
@@ -3758,12 +3866,12 @@ export default function App() {
                   }}
                   type="button"
                 >
-                  {menuExperimentsLoading ? "Loading" : "Refresh"}
+                  {menuExperimentsLoading ? "載入中" : "重新整理"}
                 </button>
               </div>
               {menuExperiments.length === 0 ? (
                 <p className="text-sm opacity-70">
-                  No active experiment metadata yet.
+                  目前沒有啟用中的 A/B 測試標記。
                 </p>
               ) : (
                 <div className="space-y-3">
@@ -3782,12 +3890,12 @@ export default function App() {
                             key={`${experiment.experimentKey}-${variant.variant}`}
                           >
                             <div className="font-medium">
-                              Variant {variant.variant}
+                              版本 {variant.variant}
                             </div>
                             <div className="text-xs opacity-70">
-                              items {variant.itemCount} · orders{" "}
-                              {variant.orderCount} · qty {variant.quantitySold} ·
-                              revenue ${variant.revenue}
+                              品項 {variant.itemCount} · 訂單{" "}
+                              {variant.orderCount} · 份數 {variant.quantitySold} ·
+                              營收 ${variant.revenue}
                             </div>
                           </div>
                         ))}
@@ -3797,7 +3905,8 @@ export default function App() {
                 </div>
               )}
             </div>
-          </section>
+            </div>
+          </CollapsibleSection>
         ) : null}
 
         {items.length === 0 ? (

@@ -14,6 +14,7 @@ import {
   createRoleRequestBodySchema,
   currentUserResponseSchema,
   deleteMenuItemParamsSchema,
+  experimentedMenuQuerySchema,
   getMenuHistoryParamsSchema,
   getMenuPriceAnalysisParamsSchema,
   getOrderByIdParamsSchema,
@@ -61,6 +62,7 @@ import { db } from "./db/client.ts";
 import { user as authUsersTable } from "./db/auth-schema.ts";
 import { roleAuditLogsTable, roleRequestsTable } from "./db/schema.ts";
 import { hasAnyRole, normalizeRoles, requireAnyRole } from "./shared/guards.ts";
+import { selectExperimentedMenuItems } from "./shared/menu-experiments.ts";
 import type {
   AdminUser,
   OperationsSummary,
@@ -940,6 +942,29 @@ app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
     200: menuListResponseSchema,
   },
 });
+
+app.get(
+  "/api/menu/experimented",
+  ({ query }) => {
+    const visitorKey = (query as { visitorKey: string }).visitorKey;
+    return {
+      data: selectExperimentedMenuItems(store.getMenu(), visitorKey),
+    };
+  },
+  {
+    query: experimentedMenuQuerySchema,
+    detail: {
+      tags: ["menu"],
+      summary: "List experimented menu items",
+      description:
+        "Return public menu items with stable A/B variant selection by visitor key.",
+    },
+    response: {
+      200: menuListResponseSchema,
+      400: apiErrorResponseSchema,
+    },
+  },
+);
 
 app.get(
   "/api/menu/admin",
