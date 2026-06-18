@@ -35,12 +35,16 @@ export const orderStatusSchema = z.enum([
 export const paymentStatusSchema = z.enum(["unpaid", "paid", "refunded"]);
 
 export const operationsSummaryRangeSchema = z.enum(["today", "all"]);
+export const menuVersionLevelSchema = z.enum(["minor", "major"]);
 
 export const menuItemSchema = z.object({
   id: z.string().min(1),
   entityId: z.string().min(1),
   logicalId: z.string().min(1),
   version: z.number().int().min(1),
+  majorVersion: z.number().int().min(1),
+  minorVersion: z.number().int().min(0),
+  versionNote: z.string(),
   name: z.string().min(1),
   price: z.number().min(0),
   salePrice: z.number().int().min(1).nullable(),
@@ -51,6 +55,8 @@ export const menuItemSchema = z.object({
   displayOrder: z.number().int().min(0),
   isSoldOut: z.boolean(),
   isHidden: z.boolean(),
+  experimentKey: z.string(),
+  experimentVariant: z.string(),
   isCurrentVersion: z.boolean(),
   supersedes: z.string().min(1).nullable().optional(),
   changeReason: z.string().nullable().optional(),
@@ -123,6 +129,43 @@ export const operationsSummarySchema = z.object({
   }),
 });
 
+export const menuPriceAnalysisVersionSchema = z.object({
+  id: z.string().min(1),
+  logicalId: z.string().min(1),
+  version: z.number().int().min(1),
+  majorVersion: z.number().int().min(1),
+  minorVersion: z.number().int().min(0),
+  price: z.number().min(0),
+  salePrice: z.number().int().min(1).nullable(),
+  orderCount: z.number().int().min(0),
+  quantitySold: z.number().int().min(0),
+  revenue: z.number().min(0),
+  averageUnitPrice: z.number().min(0),
+  isCurrentVersion: z.boolean(),
+});
+
+export const menuPriceAnalysisSchema = z.object({
+  logicalId: z.string().min(1),
+  name: z.string().min(1),
+  totalOrderCount: z.number().int().min(0),
+  totalQuantitySold: z.number().int().min(0),
+  totalRevenue: z.number().min(0),
+  versions: z.array(menuPriceAnalysisVersionSchema),
+});
+
+export const menuExperimentSchema = z.object({
+  experimentKey: z.string().min(1),
+  variants: z.array(
+    z.object({
+      variant: z.string().min(1),
+      itemCount: z.number().int().min(0),
+      orderCount: z.number().int().min(0),
+      quantitySold: z.number().int().min(0),
+      revenue: z.number().min(0),
+    }),
+  ),
+});
+
 export const roleRequestSchema = z.object({
   id: z.number().int().min(1),
   userId: z.string().min(1),
@@ -163,6 +206,7 @@ export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
 export type OperationsSummaryRange = z.infer<
   typeof operationsSummaryRangeSchema
 >;
+export type MenuVersionLevel = z.infer<typeof menuVersionLevelSchema>;
 export type MenuItem = z.infer<typeof menuItemSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
 export type AdminUser = z.infer<typeof adminUserSchema>;
@@ -170,6 +214,11 @@ export type User = SessionUser;
 export type OrderItem = z.infer<typeof orderItemSchema>;
 export type Order = z.infer<typeof orderSchema>;
 export type OperationsSummary = z.infer<typeof operationsSummarySchema>;
+export type MenuPriceAnalysis = z.infer<typeof menuPriceAnalysisSchema>;
+export type MenuPriceAnalysisVersion = z.infer<
+  typeof menuPriceAnalysisVersionSchema
+>;
+export type MenuExperiment = z.infer<typeof menuExperimentSchema>;
 export type RoleRequest = z.infer<typeof roleRequestSchema>;
 export type RoleAuditLog = z.infer<typeof roleAuditLogSchema>;
 

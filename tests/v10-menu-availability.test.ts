@@ -27,6 +27,11 @@ function menuItem(id: string, patch: Partial<{
     displayOrder: 1,
     isSoldOut: patch.isSoldOut ?? false,
     isHidden: patch.isHidden ?? false,
+    majorVersion: 1,
+    minorVersion: 0,
+    versionNote: "",
+    experimentKey: "",
+    experimentVariant: "",
     isCurrentVersion: true,
   };
 }

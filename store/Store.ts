@@ -1,4 +1,12 @@
-import type { MenuItem, Order, OrderStatus, Role } from "../shared/contracts.ts";
+import type {
+  MenuExperiment,
+  MenuItem,
+  MenuPriceAnalysis,
+  MenuVersionLevel,
+  Order,
+  OrderStatus,
+  Role,
+} from "../shared/contracts.ts";
 
 export type UpdateOrderItemErrorCode =
   | "ORDER_NOT_FOUND"
@@ -48,6 +56,9 @@ export interface Store {
     image_url: string;
     sale_price?: number | null;
     promotion_label?: string;
+    version_note?: string;
+    experiment_key?: string;
+    experiment_variant?: string;
     display_order?: number;
     is_sold_out?: boolean;
     is_hidden?: boolean;
@@ -63,6 +74,10 @@ export interface Store {
       image_url?: string;
       sale_price?: number | null;
       promotion_label?: string;
+      version_level?: MenuVersionLevel;
+      version_note?: string;
+      experiment_key?: string;
+      experiment_variant?: string;
       is_sold_out?: boolean;
       is_hidden?: boolean;
       change_reason?: string;
@@ -73,6 +88,8 @@ export interface Store {
     items: Array<{ id: string; displayOrder: number }>,
   ): Promise<ReadonlyArray<MenuItem> | null>;
   getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>>;
+  getMenuPriceAnalysis(menuId: string): Promise<MenuPriceAnalysis | null>;
+  getMenuExperiments(): ReadonlyArray<MenuExperiment>;
 
   getOrders(): ReadonlyArray<Order>;
   getWorkbenchOrders(): ReadonlyArray<Order>;

@@ -15,13 +15,16 @@ import {
   currentUserResponseSchema,
   deleteMenuItemParamsSchema,
   getMenuHistoryParamsSchema,
+  getMenuPriceAnalysisParamsSchema,
   getOrderByIdParamsSchema,
   healthResponseSchema,
   listRoleAuditLogsQuerySchema,
   listRoleRequestsQuerySchema,
   menuHistoryResponseSchema,
+  menuExperimentListResponseSchema,
   menuItemResponseSchema,
   menuListResponseSchema,
+  menuPriceAnalysisResponseSchema,
   nullableOrderResponseEnvelopeSchema,
   orderListResponseSchema,
   ordersCsvQuerySchema,
@@ -1021,6 +1024,57 @@ app.patch(
       400: apiErrorResponseSchema,
       401: apiErrorResponseSchema,
       403: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/menu/experiments",
+  async ({ request }) => {
+    await requireUserWithAnyRole(request, menuManagerRoles);
+    return { data: [...store.getMenuExperiments()] };
+  },
+  {
+    detail: {
+      tags: ["menu"],
+      summary: "List menu experiments",
+      description:
+        "Return owner/admin-only A/B test metadata grouped by experiment key.",
+    },
+    response: {
+      200: menuExperimentListResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/menu/:id/price-analysis",
+  async ({ params, request, set }) => {
+    await requireUserWithAnyRole(request, menuManagerRoles);
+    const analysis = await store.getMenuPriceAnalysis(params.id);
+
+    if (!analysis) {
+      set.status = 404;
+      return { error: "Menu item not found" };
+    }
+
+    return { data: analysis };
+  },
+  {
+    params: getMenuPriceAnalysisParamsSchema,
+    detail: {
+      tags: ["menu"],
+      summary: "Get menu price analysis",
+      description:
+        "Return version-level price and sales analysis for a logical menu item.",
+    },
+    response: {
+      200: menuPriceAnalysisResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
     },
   },
 );

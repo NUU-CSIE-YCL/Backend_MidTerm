@@ -1,11 +1,14 @@
 import { mkdir, rename } from "node:fs/promises";
 import type {
+  MenuExperiment,
   MenuItem,
+  MenuPriceAnalysis,
   Order,
   OrderItem,
   OrderStatus,
   PaymentStatus,
   Role,
+  MenuVersionLevel,
 } from "../../shared/contracts.ts";
 import type { Store } from "../Store.ts";
 
@@ -90,6 +93,45 @@ function normalizeExistingSalePrice(
     : normalizeSalePrice(salePrice, price);
 }
 
+function getEffectiveMenuPrice(item: MenuItem): number {
+  return item.salePrice ?? item.price;
+}
+
+function createPriceAnalysisVersion(
+  version: MenuItem,
+  orders: readonly Order[],
+): MenuPriceAnalysis["versions"][number] {
+  const orderIds = new Set<number>();
+  let quantitySold = 0;
+  let revenue = 0;
+
+  for (const order of orders) {
+    if (order.status === "pending") continue;
+
+    for (const orderItem of order.items) {
+      if (orderItem.item.id !== version.id) continue;
+      orderIds.add(order.id);
+      quantitySold += orderItem.qty;
+      revenue += getEffectiveMenuPrice(orderItem.item) * orderItem.qty;
+    }
+  }
+
+  return {
+    id: version.id,
+    logicalId: version.logicalId,
+    version: version.version,
+    majorVersion: version.majorVersion,
+    minorVersion: version.minorVersion,
+    price: version.price,
+    salePrice: version.salePrice,
+    orderCount: orderIds.size,
+    quantitySold,
+    revenue,
+    averageUnitPrice: quantitySold > 0 ? Math.round(revenue / quantitySold) : 0,
+    isCurrentVersion: version.isCurrentVersion,
+  };
+}
+
 function canUseCounterService(actorRoles: readonly Role[]): boolean {
   return actorRoles.some((role) =>
     role === "staff" || role === "owner" || role === "admin",
@@ -138,12 +180,17 @@ function createInitialMenuItem(
     price,
     salePrice: null,
     promotionLabel: "",
+    majorVersion: 1,
+    minorVersion: 0,
+    versionNote: "",
     category,
     description,
     image_url,
     displayOrder: Number.parseInt(logicalId, 10) || 0,
     isSoldOut: false,
     isHidden: false,
+    experimentKey: "",
+    experimentVariant: "",
     isCurrentVersion: true,
     changeReason: "Initial seed",
     createdAt: new Date(0).toISOString(),
@@ -183,6 +230,15 @@ function normalizeMenuItem(
     entityId: item.entityId ?? `json-${logicalId}`,
     logicalId,
     version,
+    majorVersion:
+      typeof item.majorVersion === "number" && Number.isFinite(item.majorVersion)
+        ? item.majorVersion
+        : 1,
+    minorVersion:
+      typeof item.minorVersion === "number" && Number.isFinite(item.minorVersion)
+        ? item.minorVersion
+        : 0,
+    versionNote: typeof item.versionNote === "string" ? item.versionNote : "",
     name: item.name ?? "",
     price: item.price ?? 0,
     salePrice:
@@ -200,6 +256,10 @@ function normalizeMenuItem(
         : fallback,
     isSoldOut: item.isSoldOut ?? false,
     isHidden: item.isHidden ?? false,
+    experimentKey:
+      typeof item.experimentKey === "string" ? item.experimentKey : "",
+    experimentVariant:
+      typeof item.experimentVariant === "string" ? item.experimentVariant : "",
     isCurrentVersion: item.isCurrentVersion ?? true,
     supersedes: item.supersedes,
     changeReason: item.changeReason,
@@ -361,6 +421,9 @@ export class JsonFileStore implements Store {
     image_url: string;
     sale_price?: number | null;
     promotion_label?: string;
+    version_note?: string;
+    experiment_key?: string;
+    experiment_variant?: string;
     display_order?: number;
     is_sold_out?: boolean;
     is_hidden?: boolean;
@@ -373,6 +436,9 @@ export class JsonFileStore implements Store {
       entityId: crypto.randomUUID(),
       logicalId,
       version: 1,
+      majorVersion: 1,
+      minorVersion: 0,
+      versionNote: input.version_note?.trim() ?? "",
       name: input.name,
       price: input.price,
       salePrice: normalizeSalePrice(input.sale_price, input.price),
@@ -383,6 +449,8 @@ export class JsonFileStore implements Store {
       displayOrder: input.display_order ?? this.nextDisplayOrder(),
       isSoldOut: input.is_sold_out ?? false,
       isHidden: input.is_hidden ?? false,
+      experimentKey: input.experiment_key?.trim() ?? "",
+      experimentVariant: input.experiment_variant?.trim() ?? "",
       isCurrentVersion: true,
       changeReason: input.change_reason ?? "Initial creation",
       createdAt: new Date().toISOString(),
@@ -405,6 +473,10 @@ export class JsonFileStore implements Store {
       image_url?: string;
       sale_price?: number | null;
       promotion_label?: string;
+      version_level?: MenuVersionLevel;
+      version_note?: string;
+      experiment_key?: string;
+      experiment_variant?: string;
       is_sold_out?: boolean;
       is_hidden?: boolean;
       change_reason?: string;
@@ -418,6 +490,11 @@ export class JsonFileStore implements Store {
     current.isCurrentVersion = false;
 
     const nextVersion = current.version + 1;
+    const versionLevel = patch.version_level ?? "minor";
+    const nextMajorVersion =
+      versionLevel === "major" ? current.majorVersion + 1 : current.majorVersion;
+    const nextMinorVersion =
+      versionLevel === "major" ? 0 : current.minorVersion + 1;
     const nextPrice = patch.price ?? current.price;
     const nextSalePrice =
       patch.sale_price === undefined
@@ -427,6 +504,12 @@ export class JsonFileStore implements Store {
       ...current,
       id: `${current.logicalId}-${String(nextVersion).padStart(2, "0")}`,
       version: nextVersion,
+      majorVersion: nextMajorVersion,
+      minorVersion: nextMinorVersion,
+      versionNote:
+        patch.version_note !== undefined
+          ? patch.version_note.trim()
+          : current.versionNote,
       name: patch.name ?? current.name,
       price: nextPrice,
       salePrice: nextSalePrice,
@@ -440,6 +523,14 @@ export class JsonFileStore implements Store {
       displayOrder: current.displayOrder,
       isSoldOut: patch.is_sold_out ?? current.isSoldOut,
       isHidden: patch.is_hidden ?? current.isHidden,
+      experimentKey:
+        patch.experiment_key !== undefined
+          ? patch.experiment_key.trim()
+          : current.experimentKey,
+      experimentVariant:
+        patch.experiment_variant !== undefined
+          ? patch.experiment_variant.trim()
+          : current.experimentVariant,
       isCurrentVersion: true,
       supersedes: current.id,
       changeReason: patch.change_reason ?? "Menu item updated",
@@ -498,6 +589,82 @@ export class JsonFileStore implements Store {
     return this.menu
       .filter((item) => item.logicalId === target.logicalId)
       .sort((a, b) => b.version - a.version);
+  }
+
+  async getMenuPriceAnalysis(menuId: string): Promise<MenuPriceAnalysis | null> {
+    const target = this.menu.find(
+      (item) => item.logicalId === menuId || item.id === menuId,
+    );
+    if (!target) return null;
+
+    const versions = this.menu
+      .filter((item) => item.logicalId === target.logicalId)
+      .sort((a, b) => b.version - a.version);
+    const versionRows = versions.map((version) =>
+      createPriceAnalysisVersion(version, this.orders),
+    );
+
+    return {
+      logicalId: target.logicalId,
+      name: target.name,
+      totalOrderCount: versionRows.reduce((sum, row) => sum + row.orderCount, 0),
+      totalQuantitySold: versionRows.reduce(
+        (sum, row) => sum + row.quantitySold,
+        0,
+      ),
+      totalRevenue: versionRows.reduce((sum, row) => sum + row.revenue, 0),
+      versions: versionRows,
+    };
+  }
+
+  getMenuExperiments(): ReadonlyArray<MenuExperiment> {
+    const groups = new Map<
+      string,
+      Map<string, { itemCount: number; orderIds: Set<number>; quantitySold: number; revenue: number }>
+    >();
+
+    for (const item of this.menu.filter((entry) => entry.isCurrentVersion)) {
+      if (!item.experimentKey || !item.experimentVariant) continue;
+      const variants = groups.get(item.experimentKey) ?? new Map();
+      const stats =
+        variants.get(item.experimentVariant) ??
+        { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
+      stats.itemCount += 1;
+      variants.set(item.experimentVariant, stats);
+      groups.set(item.experimentKey, variants);
+    }
+
+    for (const order of this.orders.filter((entry) => entry.status !== "pending")) {
+      for (const orderItem of order.items) {
+        const key = orderItem.item.experimentKey;
+        const variant = orderItem.item.experimentVariant;
+        if (!key || !variant) continue;
+        const variants = groups.get(key) ?? new Map();
+        const stats =
+          variants.get(variant) ??
+          { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
+        stats.orderIds.add(order.id);
+        stats.quantitySold += orderItem.qty;
+        stats.revenue += getEffectiveMenuPrice(orderItem.item) * orderItem.qty;
+        variants.set(variant, stats);
+        groups.set(key, variants);
+      }
+    }
+
+    return [...groups.entries()]
+      .map(([experimentKey, variants]) => ({
+        experimentKey,
+        variants: [...variants.entries()]
+          .map(([variant, stats]) => ({
+            variant,
+            itemCount: stats.itemCount,
+            orderCount: stats.orderIds.size,
+            quantitySold: stats.quantitySold,
+            revenue: stats.revenue,
+          }))
+          .sort((a, b) => a.variant.localeCompare(b.variant)),
+      }))
+      .sort((a, b) => a.experimentKey.localeCompare(b.experimentKey));
   }
 
   getOrders(): ReadonlyArray<Order> {

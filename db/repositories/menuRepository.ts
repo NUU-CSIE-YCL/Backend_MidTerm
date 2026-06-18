@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
-import type { MenuItem } from "../../shared/contracts.ts";
+import type { MenuItem, MenuVersionLevel } from "../../shared/contracts.ts";
 import { db } from "../client.ts";
 import { menuItemsTable } from "../schema.ts";
 
@@ -12,6 +12,9 @@ export interface CreateVersionedMenuItemInput {
   price: number;
   sale_price?: number | null;
   promotion_label?: string;
+  version_note?: string;
+  experiment_key?: string;
+  experiment_variant?: string;
   category: string;
   description: string;
   image_url: string;
@@ -26,6 +29,10 @@ export interface UpdateVersionedMenuItemInput {
   price?: number;
   sale_price?: number | null;
   promotion_label?: string;
+  version_level?: MenuVersionLevel;
+  version_note?: string;
+  experiment_key?: string;
+  experiment_variant?: string;
   category?: string;
   description?: string;
   image_url?: string;
@@ -40,6 +47,9 @@ export function toMenuItem(row: MenuRow): MenuItem {
     entityId: row.entityId,
     logicalId: row.logicalId,
     version: row.version,
+    majorVersion: row.majorVersion,
+    minorVersion: row.minorVersion,
+    versionNote: row.versionNote,
     name: row.name,
     price: row.price,
     salePrice: row.salePrice,
@@ -50,6 +60,8 @@ export function toMenuItem(row: MenuRow): MenuItem {
     displayOrder: row.displayOrder,
     isSoldOut: row.isSoldOut,
     isHidden: row.isHidden,
+    experimentKey: row.experimentKey,
+    experimentVariant: row.experimentVariant,
     isCurrentVersion: row.isCurrentVersion,
     supersedes: row.supersedes,
     changeReason: row.changeReason,
@@ -162,6 +174,9 @@ export class MenuRepository {
           entityId: crypto.randomUUID(),
           logicalId,
           version: 1,
+          majorVersion: 1,
+          minorVersion: 0,
+          versionNote: input.version_note?.trim() ?? "",
           name: input.name,
           price: input.price,
           salePrice: normalizeSalePrice(input.sale_price, input.price),
@@ -173,6 +188,8 @@ export class MenuRepository {
             input.display_order ?? (await this.nextDisplayOrder(tx)),
           isSoldOut: input.is_sold_out ?? false,
           isHidden: input.is_hidden ?? false,
+          experimentKey: input.experiment_key?.trim() ?? "",
+          experimentVariant: input.experiment_variant?.trim() ?? "",
           isCurrentVersion: true,
           changeReason: input.change_reason ?? "Initial creation",
           createdBy,
@@ -200,6 +217,11 @@ export class MenuRepository {
 
       const nextVersion = current.version + 1;
       const nextPrice = patch.price ?? current.price;
+      const versionLevel = patch.version_level ?? "minor";
+      const nextMajorVersion =
+        versionLevel === "major" ? current.majorVersion + 1 : current.majorVersion;
+      const nextMinorVersion =
+        versionLevel === "major" ? 0 : current.minorVersion + 1;
       const nextSalePrice =
         patch.sale_price === undefined
           ? normalizeSalePrice(current.salePrice, nextPrice)
@@ -211,6 +233,12 @@ export class MenuRepository {
           entityId: current.entityId,
           logicalId: current.logicalId,
           version: nextVersion,
+          majorVersion: nextMajorVersion,
+          minorVersion: nextMinorVersion,
+          versionNote:
+            patch.version_note !== undefined
+              ? patch.version_note.trim()
+              : current.versionNote,
           name: patch.name ?? current.name,
           price: nextPrice,
           salePrice: nextSalePrice,
@@ -224,6 +252,14 @@ export class MenuRepository {
           displayOrder: current.displayOrder,
           isSoldOut: patch.is_sold_out ?? current.isSoldOut,
           isHidden: patch.is_hidden ?? current.isHidden,
+          experimentKey:
+            patch.experiment_key !== undefined
+              ? patch.experiment_key.trim()
+              : current.experimentKey,
+          experimentVariant:
+            patch.experiment_variant !== undefined
+              ? patch.experiment_variant.trim()
+              : current.experimentVariant,
           isCurrentVersion: true,
           supersedes: current.id,
           changeReason: patch.change_reason ?? "Menu item updated",

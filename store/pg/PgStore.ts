@@ -1,6 +1,9 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type {
+  MenuExperiment,
   MenuItem,
+  MenuPriceAnalysis,
+  MenuVersionLevel,
   Order,
   OrderItem,
   OrderStatus,
@@ -62,6 +65,45 @@ function calculateTotal(items: ReadonlyArray<OrderItem>): number {
     const unitPrice = oi.item.salePrice ?? oi.item.price;
     return sum + unitPrice * oi.qty;
   }, 0);
+}
+
+function getEffectiveMenuPrice(item: MenuItem): number {
+  return item.salePrice ?? item.price;
+}
+
+function createPriceAnalysisVersion(
+  version: MenuItem,
+  orders: readonly Order[],
+): MenuPriceAnalysis["versions"][number] {
+  const orderIds = new Set<number>();
+  let quantitySold = 0;
+  let revenue = 0;
+
+  for (const order of orders) {
+    if (order.status === "pending") continue;
+
+    for (const orderItem of order.items) {
+      if (orderItem.item.id !== version.id) continue;
+      orderIds.add(order.id);
+      quantitySold += orderItem.qty;
+      revenue += getEffectiveMenuPrice(orderItem.item) * orderItem.qty;
+    }
+  }
+
+  return {
+    id: version.id,
+    logicalId: version.logicalId,
+    version: version.version,
+    majorVersion: version.majorVersion,
+    minorVersion: version.minorVersion,
+    price: version.price,
+    salePrice: version.salePrice,
+    orderCount: orderIds.size,
+    quantitySold,
+    revenue,
+    averageUnitPrice: quantitySold > 0 ? Math.round(revenue / quantitySold) : 0,
+    isCurrentVersion: version.isCurrentVersion,
+  };
 }
 
 function normalizeOrderStatus(value: unknown): OrderStatus {
@@ -148,6 +190,9 @@ export class PgStore implements Store {
     image_url: string;
     sale_price?: number | null;
     promotion_label?: string;
+    version_note?: string;
+    experiment_key?: string;
+    experiment_variant?: string;
     display_order?: number;
     is_sold_out?: boolean;
     is_hidden?: boolean;
@@ -169,6 +214,10 @@ export class PgStore implements Store {
       image_url?: string;
       sale_price?: number | null;
       promotion_label?: string;
+      version_level?: MenuVersionLevel;
+      version_note?: string;
+      experiment_key?: string;
+      experiment_variant?: string;
       is_sold_out?: boolean;
       is_hidden?: boolean;
       change_reason?: string;
@@ -214,6 +263,78 @@ export class PgStore implements Store {
 
   async getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>> {
     return await menuRepository.getMenuHistory(menuId);
+  }
+
+  async getMenuPriceAnalysis(menuId: string): Promise<MenuPriceAnalysis | null> {
+    const history = await menuRepository.getMenuHistory(menuId);
+    if (history.length === 0) return null;
+
+    const target = history[0]!;
+    const versionRows = history.map((version) =>
+      createPriceAnalysisVersion(version, this.orders),
+    );
+
+    return {
+      logicalId: target.logicalId,
+      name: target.name,
+      totalOrderCount: versionRows.reduce((sum, row) => sum + row.orderCount, 0),
+      totalQuantitySold: versionRows.reduce(
+        (sum, row) => sum + row.quantitySold,
+        0,
+      ),
+      totalRevenue: versionRows.reduce((sum, row) => sum + row.revenue, 0),
+      versions: versionRows,
+    };
+  }
+
+  getMenuExperiments(): ReadonlyArray<MenuExperiment> {
+    const groups = new Map<
+      string,
+      Map<string, { itemCount: number; orderIds: Set<number>; quantitySold: number; revenue: number }>
+    >();
+
+    for (const item of this.menu) {
+      if (!item.experimentKey || !item.experimentVariant) continue;
+      const variants = groups.get(item.experimentKey) ?? new Map();
+      const stats =
+        variants.get(item.experimentVariant) ??
+        { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
+      stats.itemCount += 1;
+      variants.set(item.experimentVariant, stats);
+      groups.set(item.experimentKey, variants);
+    }
+
+    for (const order of this.orders.filter((entry) => entry.status !== "pending")) {
+      for (const orderItem of order.items) {
+        const key = orderItem.item.experimentKey;
+        const variant = orderItem.item.experimentVariant;
+        if (!key || !variant) continue;
+        const variants = groups.get(key) ?? new Map();
+        const stats =
+          variants.get(variant) ??
+          { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
+        stats.orderIds.add(order.id);
+        stats.quantitySold += orderItem.qty;
+        stats.revenue += getEffectiveMenuPrice(orderItem.item) * orderItem.qty;
+        variants.set(variant, stats);
+        groups.set(key, variants);
+      }
+    }
+
+    return [...groups.entries()]
+      .map(([experimentKey, variants]) => ({
+        experimentKey,
+        variants: [...variants.entries()]
+          .map(([variant, stats]) => ({
+            variant,
+            itemCount: stats.itemCount,
+            orderCount: stats.orderIds.size,
+            quantitySold: stats.quantitySold,
+            revenue: stats.revenue,
+          }))
+          .sort((a, b) => a.variant.localeCompare(b.variant)),
+      }))
+      .sort((a, b) => a.experimentKey.localeCompare(b.experimentKey));
   }
 
   // ── Orders ──────────────────────────────────────────────────
@@ -657,6 +778,9 @@ export class PgStore implements Store {
             entityId: crypto.randomUUID(),
             logicalId,
             version: 1,
+            majorVersion: 1,
+            minorVersion: 0,
+            versionNote: "",
             name: item.name,
             price: item.price,
             salePrice: null,
@@ -667,6 +791,8 @@ export class PgStore implements Store {
             displayOrder: index + 1,
             isSoldOut: false,
             isHidden: false,
+            experimentKey: "",
+            experimentVariant: "",
             isCurrentVersion: true,
             changeReason: "Initial seed",
             createdBy: "system",
@@ -701,6 +827,9 @@ export class PgStore implements Store {
         entityId: menuItemsTable.entityId,
         logicalId: menuItemsTable.logicalId,
         version: menuItemsTable.version,
+        majorVersion: menuItemsTable.majorVersion,
+        minorVersion: menuItemsTable.minorVersion,
+        versionNote: menuItemsTable.versionNote,
         name: menuItemsTable.name,
         price: menuItemsTable.price,
         salePrice: menuItemsTable.salePrice,
@@ -711,6 +840,8 @@ export class PgStore implements Store {
         displayOrder: menuItemsTable.displayOrder,
         isSoldOut: menuItemsTable.isSoldOut,
         isHidden: menuItemsTable.isHidden,
+        experimentKey: menuItemsTable.experimentKey,
+        experimentVariant: menuItemsTable.experimentVariant,
         isCurrentVersion: menuItemsTable.isCurrentVersion,
         supersedes: menuItemsTable.supersedes,
         changeReason: menuItemsTable.changeReason,
@@ -735,6 +866,9 @@ export class PgStore implements Store {
           entityId: row.entityId,
           logicalId: row.logicalId,
           version: row.version,
+          majorVersion: row.majorVersion,
+          minorVersion: row.minorVersion,
+          versionNote: row.versionNote,
           name: row.name,
           price: row.price,
           salePrice: row.salePrice,
@@ -745,6 +879,8 @@ export class PgStore implements Store {
           displayOrder: row.displayOrder,
           isSoldOut: row.isSoldOut,
           isHidden: row.isHidden,
+          experimentKey: row.experimentKey,
+          experimentVariant: row.experimentVariant,
           isCurrentVersion: row.isCurrentVersion,
           supersedes: row.supersedes,
           changeReason: row.changeReason,

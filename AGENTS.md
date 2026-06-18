@@ -1,5 +1,38 @@
 # AGENTS.md
 
+## 最新交接摘要：V10.3 菜單版本化進階功能
+
+- 使用者已回報 `V10.5C 單品特價與折扣價基礎`、`V10.6A 營運報表 CSV 匯出` 已通過 Render 驗證。
+- 本輪已實作老師講義 V10.3 進階功能中的三個可展示切片：
+  - `分級版本管理（major/minor version）`
+  - `價格敏感度分析`
+  - `A/B 測試支援` 的 metadata 與後台彙整，不做顧客隨機分流
+- 新增 migrations：
+  - `drizzle-v10/0011_v10_menu_semantic_versions.sql`
+  - `drizzle-v10/0012_v10_menu_ab_test_metadata.sql`
+- `menu_items` 新增欄位：`major_version`、`minor_version`、`version_note`、`experiment_key`、`experiment_variant`。
+- `PATCH /api/menu/:id` 新增 `version_level: "minor" | "major"`：
+  - minor：major 不變、minor + 1
+  - major：major + 1、minor reset 為 0
+  - 既有版本 ID 如 `001-02` 不改，避免破壞訂單引用
+- 新增 API：
+  - `GET /api/menu/:id/price-analysis`，需要 `owner/admin`
+  - `GET /api/menu/experiments`，需要 `owner/admin`
+- 前端菜單管理已新增 version level、version note、A/B test key、A/B variant、`Price analysis` 按鈕，以及 admin-only 的 `Price analysis` / `A/B experiments` 摘要區。
+- 新增測試：
+  - `tests/v10-menu-semantic-version.test.ts`
+  - `tests/v10-price-analysis.test.ts`
+  - `tests/v10-menu-ab-test.test.ts`
+- 本機驗證已通過：`bun test`、`bun run build`、入口檔 TypeScript check。
+
+### Render 驗證建議
+
+- Render migration log 應出現 `0011_v10_menu_semantic_versions` 與 `0012_v10_menu_ab_test_metadata`。
+- owner/admin 編輯菜單時可選 `minor` 或 `major`。
+- 編輯同一品項後，價格分析可看到不同版本的價格、銷售份數與營收。
+- owner/admin 可設定 `experiment_key` / `experiment_variant`，並在 A/B experiments 摘要區看到彙整。
+- customer 公開菜單與下單流程不應因 A/B metadata 改變。
+
 ## 最新交接：V10.5C + V10.6A 合併實作中
 
 - 使用者已回報 `V10.5B 菜單分類與售完/隱藏狀態` Render 驗證成功。

@@ -2,7 +2,10 @@ import { z } from "zod";
 import type { Order } from "./contracts.ts";
 import {
   adminUserSchema,
+  menuExperimentSchema,
   menuItemSchema,
+  menuPriceAnalysisSchema,
+  menuVersionLevelSchema,
   operationsSummaryRangeSchema,
   operationsSummarySchema,
   orderSchema,
@@ -55,6 +58,14 @@ export const roleAuditLogListResponseSchema = z.object({
 
 export const operationsSummaryResponseSchema = z.object({
   data: operationsSummarySchema,
+});
+
+export const menuPriceAnalysisResponseSchema = z.object({
+  data: menuPriceAnalysisSchema,
+});
+
+export const menuExperimentListResponseSchema = z.object({
+  data: z.array(menuExperimentSchema),
 });
 
 export const ordersCsvQuerySchema = z.object({
@@ -114,6 +125,9 @@ export const createMenuItemBodySchema = z.object({
   image_url: z.string().min(1),
   sale_price: z.number().int().min(1).nullable().optional(),
   promotion_label: z.string().trim().max(40).optional(),
+  version_note: z.string().trim().max(120).optional(),
+  experiment_key: z.string().trim().max(80).optional(),
+  experiment_variant: z.string().trim().max(40).optional(),
   display_order: z.number().int().min(0).optional(),
   is_sold_out: z.boolean().optional(),
   is_hidden: z.boolean().optional(),
@@ -141,6 +155,10 @@ export const updateMenuItemBodySchema = z.object({
   image_url: z.string().min(1).optional(),
   sale_price: z.number().int().min(1).nullable().optional(),
   promotion_label: z.string().trim().max(40).optional(),
+  version_level: menuVersionLevelSchema.optional().default("minor"),
+  version_note: z.string().trim().max(120).optional(),
+  experiment_key: z.string().trim().max(80).optional(),
+  experiment_variant: z.string().trim().max(40).optional(),
   is_sold_out: z.boolean().optional(),
   is_hidden: z.boolean().optional(),
   change_reason: z.string().min(1).optional(),
@@ -178,6 +196,11 @@ export const reorderMenuBodySchema = z.object({
 
 /** GET /api/menu/:id/history */
 export const getMenuHistoryParamsSchema = z.object({
+  id: z.string().min(1),
+});
+
+/** GET /api/menu/:id/price-analysis */
+export const getMenuPriceAnalysisParamsSchema = z.object({
   id: z.string().min(1),
 });
 

@@ -24,6 +24,11 @@ function menuItem(id: string, displayOrder: number) {
     displayOrder,
     isSoldOut: false,
     isHidden: false,
+    majorVersion: 1,
+    minorVersion: 0,
+    versionNote: "",
+    experimentKey: "",
+    experimentVariant: "",
     isCurrentVersion: true,
   };
 }

@@ -30,6 +30,9 @@ export const menuItemsTable = appSchema.table(
     entityId: text("entity_id").notNull(),
     logicalId: text("logical_id").notNull(),
     version: integer("version").notNull().default(1),
+    majorVersion: integer("major_version").notNull().default(1),
+    minorVersion: integer("minor_version").notNull().default(0),
+    versionNote: text("version_note").notNull().default(""),
     name: text("name").notNull(),
     price: integer("price").notNull(),
     category: text("category").notNull(),
@@ -40,6 +43,8 @@ export const menuItemsTable = appSchema.table(
     displayOrder: integer("display_order").notNull().default(0),
     isSoldOut: boolean("is_sold_out").notNull().default(false),
     isHidden: boolean("is_hidden").notNull().default(false),
+    experimentKey: text("experiment_key").notNull().default(""),
+    experimentVariant: text("experiment_variant").notNull().default(""),
     isCurrentVersion: boolean("is_current_version").notNull().default(true),
     supersedes: text("supersedes").references(
       (): AnyPgColumn => menuItemsTable.id,

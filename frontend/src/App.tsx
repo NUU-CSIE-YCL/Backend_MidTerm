@@ -15,7 +15,10 @@ import {
 import type {
   AdminUser,
   ApiDataResponse,
+  MenuExperiment,
   MenuItem,
+  MenuPriceAnalysis,
+  MenuVersionLevel,
   Order,
   OrderStatus,
   OperationsSummary,
@@ -111,6 +114,10 @@ interface MenuFormState {
   image_url: string;
   is_sold_out: boolean;
   is_hidden: boolean;
+  version_level: MenuVersionLevel;
+  version_note: string;
+  experiment_key: string;
+  experiment_variant: string;
   change_reason: string;
 }
 
@@ -138,6 +145,10 @@ function createEmptyMenuForm(): MenuFormState {
     image_url: "",
     is_sold_out: false,
     is_hidden: false,
+    version_level: "minor",
+    version_note: "",
+    experiment_key: "",
+    experiment_variant: "",
     change_reason: "",
   };
 }
@@ -154,6 +165,10 @@ function createMenuFormFromItem(item: MenuItem): MenuFormState {
     image_url: item.image_url,
     is_sold_out: item.isSoldOut,
     is_hidden: item.isHidden,
+    version_level: "minor",
+    version_note: item.versionNote,
+    experiment_key: item.experimentKey,
+    experiment_variant: item.experimentVariant,
     change_reason: "",
   };
 }
@@ -348,6 +363,13 @@ export default function App() {
   const [historyByLogicalId, setHistoryByLogicalId] = useState<
     Record<string, MenuItem[]>
   >({});
+  const [priceAnalysisByLogicalId, setPriceAnalysisByLogicalId] = useState<
+    Record<string, MenuPriceAnalysis>
+  >({});
+  const [priceAnalysisLoadingId, setPriceAnalysisLoadingId] =
+    useState<string | null>(null);
+  const [menuExperiments, setMenuExperiments] = useState<MenuExperiment[]>([]);
+  const [menuExperimentsLoading, setMenuExperimentsLoading] = useState(false);
   const [roleRequestForm, setRoleRequestForm] = useState<{
     requestedRole: RequestableRole;
     reason: string;
@@ -452,6 +474,7 @@ export default function App() {
   async function refreshAdminMenu(): Promise<MenuItem[]> {
     const fetchedItems = await fetchAdminMenuItems();
     setAdminMenuItems(fetchedItems);
+    void loadMenuExperiments(false);
     return fetchedItems;
   }
 
@@ -1191,6 +1214,57 @@ export default function App() {
     }
   }
 
+  async function loadMenuPriceAnalysis(
+    item: MenuItem,
+    force = false,
+  ): Promise<void> {
+    if (!force && priceAnalysisByLogicalId[item.logicalId]) return;
+
+    setPriceAnalysisLoadingId(item.logicalId);
+    setMenuAdminError("");
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/menu/${item.id}/price-analysis`),
+        { credentials: "include" },
+      );
+      if (!response.ok) {
+        throw new Error(`Load price analysis failed: HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as ApiDataResponse<MenuPriceAnalysis>;
+      setPriceAnalysisByLogicalId((current) => ({
+        ...current,
+        [item.logicalId]: payload.data,
+      }));
+    } catch (analysisError) {
+      setMenuAdminError("Price analysis failed. Please try again.");
+      console.error(analysisError);
+    } finally {
+      setPriceAnalysisLoadingId(null);
+    }
+  }
+
+  async function loadMenuExperiments(showLoading = true): Promise<void> {
+    if (!user || !hasAnyRole(user, menuManagerRoles)) return;
+    if (showLoading) setMenuExperimentsLoading(true);
+
+    try {
+      const response = await fetch(buildApiUrl("/api/menu/experiments"), {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error(`Load menu experiments failed: HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as ApiDataResponse<MenuExperiment[]>;
+      setMenuExperiments(Array.isArray(payload?.data) ? payload.data : []);
+    } catch (experimentError) {
+      setMenuAdminError("A/B experiment summary failed. Please try again.");
+      console.error(experimentError);
+    } finally {
+      if (showLoading) setMenuExperimentsLoading(false);
+    }
+  }
+
   function toggleMenuHistory(item: MenuItem): void {
     if (expandedHistoryId === item.logicalId) {
       setExpandedHistoryId(null);
@@ -1238,6 +1312,10 @@ export default function App() {
       image_url: menuForm.image_url.trim(),
       is_sold_out: menuForm.is_sold_out,
       is_hidden: menuForm.is_hidden,
+      version_level: menuForm.version_level,
+      version_note: menuForm.version_note.trim(),
+      experiment_key: menuForm.experiment_key.trim(),
+      experiment_variant: menuForm.experiment_variant.trim(),
       change_reason:
         menuForm.change_reason.trim() ||
         (isEditing ? "網站管理介面更新" : "網站管理介面新增"),
@@ -3287,6 +3365,65 @@ export default function App() {
                   />
                 </label>
 
+                <label className="form-control">
+                  <span className="label-text">Version level</span>
+                  <select
+                    className="select select-bordered select-sm"
+                    onChange={(event) =>
+                      updateMenuFormField(
+                        "version_level",
+                        event.target.value as MenuVersionLevel,
+                      )
+                    }
+                    value={menuForm.version_level}
+                  >
+                    <option value="minor">minor</option>
+                    <option value="major">major</option>
+                  </select>
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">Version note</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    maxLength={120}
+                    onChange={(event) =>
+                      updateMenuFormField("version_note", event.target.value)
+                    }
+                    placeholder="recipe, size, or price note"
+                    value={menuForm.version_note}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">A/B test key</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    maxLength={80}
+                    onChange={(event) =>
+                      updateMenuFormField("experiment_key", event.target.value)
+                    }
+                    placeholder="toast-copy-2026"
+                    value={menuForm.experiment_key}
+                  />
+                </label>
+
+                <label className="form-control">
+                  <span className="label-text">A/B variant</span>
+                  <input
+                    className="input input-bordered input-sm"
+                    maxLength={40}
+                    onChange={(event) =>
+                      updateMenuFormField(
+                        "experiment_variant",
+                        event.target.value,
+                      )
+                    }
+                    placeholder="A or B"
+                    value={menuForm.experiment_variant}
+                  />
+                </label>
+
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className="label cursor-pointer justify-start gap-3 rounded border border-base-300 px-3">
                     <input
@@ -3459,6 +3596,17 @@ export default function App() {
                                 </button>
                                 <button
                                   className="btn btn-xs"
+                                  onClick={() => {
+                                    void loadMenuPriceAnalysis(item, true);
+                                  }}
+                                  type="button"
+                                >
+                                  {priceAnalysisLoadingId === item.logicalId
+                                    ? "Loading"
+                                    : "Price analysis"}
+                                </button>
+                                <button
+                                  className="btn btn-xs"
                                   onClick={() => startEditMenuItem(item)}
                                   type="button"
                                 >
@@ -3529,6 +3677,125 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </section>
+        ) : null}
+
+        {user && hasAnyRole(user, menuManagerRoles) ? (
+          <section className="mb-8 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="text-lg font-bold">Price analysis</h2>
+                {priceAnalysisLoadingId ? (
+                  <span className="loading loading-spinner loading-sm" />
+                ) : null}
+              </div>
+              {Object.values(priceAnalysisByLogicalId).length === 0 ? (
+                <p className="text-sm opacity-70">
+                  Select Price analysis in menu management to compare sales by
+                  version and price.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {Object.values(priceAnalysisByLogicalId).map((analysis) => (
+                    <div
+                      className="rounded border border-base-300 p-3"
+                      key={analysis.logicalId}
+                    >
+                      <div className="mb-2 font-semibold">{analysis.name}</div>
+                      <div className="mb-2 text-xs opacity-70">
+                        {analysis.logicalId} · orders {analysis.totalOrderCount} ·
+                        qty {analysis.totalQuantitySold} · revenue $
+                        {analysis.totalRevenue}
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="table table-xs">
+                          <thead>
+                            <tr>
+                              <th>Version</th>
+                              <th>Price</th>
+                              <th>Qty</th>
+                              <th>Revenue</th>
+                              <th>Avg</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {analysis.versions.map((version) => (
+                              <tr key={version.id}>
+                                <td>
+                                  {version.id}
+                                  <span className="ml-1 opacity-60">
+                                    {version.majorVersion}.{version.minorVersion}
+                                  </span>
+                                </td>
+                                <td>
+                                  {version.salePrice !== null
+                                    ? `$${version.salePrice} (${version.price})`
+                                    : `$${version.price}`}
+                                </td>
+                                <td>{version.quantitySold}</td>
+                                <td>${version.revenue}</td>
+                                <td>${version.averageUnitPrice}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-base-300 bg-base-100 p-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="text-lg font-bold">A/B experiments</h2>
+                <button
+                  className="btn btn-xs btn-outline"
+                  disabled={menuExperimentsLoading}
+                  onClick={() => {
+                    void loadMenuExperiments(true);
+                  }}
+                  type="button"
+                >
+                  {menuExperimentsLoading ? "Loading" : "Refresh"}
+                </button>
+              </div>
+              {menuExperiments.length === 0 ? (
+                <p className="text-sm opacity-70">
+                  No active experiment metadata yet.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {menuExperiments.map((experiment) => (
+                    <div
+                      className="rounded border border-base-300 p-3"
+                      key={experiment.experimentKey}
+                    >
+                      <div className="mb-2 font-semibold">
+                        {experiment.experimentKey}
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {experiment.variants.map((variant) => (
+                          <div
+                            className="rounded bg-base-200 p-2 text-sm"
+                            key={`${experiment.experimentKey}-${variant.variant}`}
+                          >
+                            <div className="font-medium">
+                              Variant {variant.variant}
+                            </div>
+                            <div className="text-xs opacity-70">
+                              items {variant.itemCount} · orders{" "}
+                              {variant.orderCount} · qty {variant.quantitySold} ·
+                              revenue ${variant.revenue}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         ) : null}
