@@ -880,6 +880,27 @@ app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
   },
 });
 
+app.get(
+  "/api/menu/admin",
+  async ({ request }) => {
+    await requireUserWithAnyRole(request, menuManagerRoles);
+    return { data: [...store.getAdminMenu()] };
+  },
+  {
+    detail: {
+      tags: ["menu"],
+      summary: "List admin menu items",
+      description:
+        "Return current menu items including hidden and sold out records for owner/admin users.",
+    },
+    response: {
+      200: menuListResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+    },
+  },
+);
+
 app.post(
   "/api/menu",
   async ({ body, request, set }) => {

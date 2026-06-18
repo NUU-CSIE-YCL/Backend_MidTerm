@@ -1,5 +1,25 @@
 # AGENTS.md
 
+## 最新交接補充：V10.5B 菜單分類與售完/隱藏狀態
+
+- 使用者已回報 `V10.5A 菜單顯示排序` Render 驗證成功。
+- 本輪實作 `V10.5B 菜單分類與售完/隱藏狀態`：
+  - 新增 migration：`drizzle-v10/0009_v10_menu_availability.sql`
+  - `menu_items` 新增 `is_sold_out`、`is_hidden`
+  - `MenuItem` 新增 `isSoldOut`、`isHidden`
+  - `GET /api/menu` 公開菜單過濾 hidden
+  - 新增 `GET /api/menu/admin`，owner/admin 可看完整 current menu
+  - 售完品項公開可見但不可加入購物車
+  - 隱藏品項公開不可見且不可加入購物車
+  - 前端菜單管理表單新增「售完」「隱藏」checkbox
+- 本輪測試需包含：`tests/v10-menu-availability.test.ts`
+- Render 驗證重點：
+  - migration log 出現 `0009_v10_menu_availability`
+  - owner/admin 可切換售完與隱藏
+  - 售完品項仍顯示但無法加入購物車
+  - 隱藏品項不顯示在公開菜單
+  - 取消隱藏後回到原本排序位置
+
 ## 最新交接補充：V10.5A 菜單顯示排序
 
 - 使用者已回報 `V10.4H 營運摘要看板` Render 驗證成功。

@@ -38,6 +38,7 @@ export interface Store {
   init(): Promise<void>;
 
   getMenu(): ReadonlyArray<MenuItem>;
+  getAdminMenu(): ReadonlyArray<MenuItem>;
   createMenuItem(input: {
     logical_id?: string;
     name: string;
@@ -46,6 +47,8 @@ export interface Store {
     description: string;
     image_url: string;
     display_order?: number;
+    is_sold_out?: boolean;
+    is_hidden?: boolean;
     change_reason?: string;
   }): Promise<MenuItem>;
   updateMenuItem(
@@ -56,6 +59,8 @@ export interface Store {
       category?: string;
       description?: string;
       image_url?: string;
+      is_sold_out?: boolean;
+      is_hidden?: boolean;
       change_reason?: string;
     },
   ): Promise<MenuItem | null>;

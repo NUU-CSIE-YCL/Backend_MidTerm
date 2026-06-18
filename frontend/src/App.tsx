@@ -99,6 +99,8 @@ interface MenuFormState {
   category: string;
   description: string;
   image_url: string;
+  is_sold_out: boolean;
+  is_hidden: boolean;
   change_reason: string;
 }
 
@@ -122,6 +124,8 @@ function createEmptyMenuForm(): MenuFormState {
     category: "",
     description: "",
     image_url: "",
+    is_sold_out: false,
+    is_hidden: false,
     change_reason: "",
   };
 }
@@ -134,6 +138,8 @@ function createMenuFormFromItem(item: MenuItem): MenuFormState {
     category: item.category,
     description: item.description,
     image_url: item.image_url,
+    is_sold_out: item.isSoldOut,
+    is_hidden: item.isHidden,
     change_reason: "",
   };
 }
@@ -271,6 +277,7 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
   const [items, setItems] = useState<MenuItem[]>([]);
+  const [adminMenuItems, setAdminMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [orderId, setOrderId] = useState<number | null>(null);
@@ -408,9 +415,28 @@ export default function App() {
     return Array.isArray(payload?.data) ? payload.data : [];
   }
 
+  async function fetchAdminMenuItems(): Promise<MenuItem[]> {
+    const response = await fetch(buildApiUrl("/api/menu/admin"), {
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as ApiDataResponse<MenuItem[]>;
+    return Array.isArray(payload?.data) ? payload.data : [];
+  }
+
   async function refreshMenu(): Promise<MenuItem[]> {
     const fetchedItems = await fetchMenuItems();
     setItems(fetchedItems);
+    return fetchedItems;
+  }
+
+  async function refreshAdminMenu(): Promise<MenuItem[]> {
+    const fetchedItems = await fetchAdminMenuItems();
+    setAdminMenuItems(fetchedItems);
     return fetchedItems;
   }
 
@@ -769,6 +795,7 @@ export default function App() {
       setAdminRoleRequests([]);
       setAdminUsers([]);
       setRoleAuditLogs([]);
+      setAdminMenuItems([]);
       setOperationsSummary(null);
       setRolesByUserId({});
       setRoleRequestMessage("");
@@ -806,6 +833,13 @@ export default function App() {
       void loadOperationsSummary().catch((summaryLoadError) => {
         setOperationsSummaryError("載入營運摘要失敗，請稍後再試。");
         console.error(summaryLoadError);
+      });
+    }
+
+    if (hasAnyRole(user, menuManagerRoles)) {
+      void refreshAdminMenu().catch((adminMenuLoadError) => {
+        setMenuAdminError("載入菜單管理資料失敗，請稍後再試。");
+        console.error(adminMenuLoadError);
       });
     }
 
@@ -1038,7 +1072,10 @@ export default function App() {
     resetCartState();
   }
 
-  function updateMenuFormField(field: keyof MenuFormState, value: string): void {
+  function updateMenuFormField(
+    field: keyof MenuFormState,
+    value: string | boolean,
+  ): void {
     setMenuForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -1119,12 +1156,14 @@ export default function App() {
     }
 
     const isEditing = editingMenuId !== null;
-    const payload: Record<string, string | number> = {
+    const payload: Record<string, string | number | boolean> = {
       name: menuForm.name.trim(),
       price,
       category: menuForm.category.trim(),
       description: menuForm.description.trim(),
       image_url: menuForm.image_url.trim(),
+      is_sold_out: menuForm.is_sold_out,
+      is_hidden: menuForm.is_hidden,
       change_reason:
         menuForm.change_reason.trim() ||
         (isEditing ? "網站管理介面更新" : "網站管理介面新增"),
@@ -1165,7 +1204,7 @@ export default function App() {
       const result = (await response.json()) as ApiDataResponse<MenuItem>;
       const savedItem = result.data;
 
-      await refreshMenu();
+      await Promise.all([refreshMenu(), refreshAdminMenu()]);
       setHistoryByLogicalId({});
       resetMenuEditor();
       setMenuAdminMessage(
@@ -1221,7 +1260,7 @@ export default function App() {
         throw new Error(`Retire menu item failed: HTTP ${response.status}`);
       }
 
-      await refreshMenu();
+      await Promise.all([refreshMenu(), refreshAdminMenu()]);
       setHistoryByLogicalId({});
       if (expandedHistoryId === item.logicalId) {
         setExpandedHistoryId(null);
@@ -1244,11 +1283,11 @@ export default function App() {
   }
 
   async function reorderMenuItem(item: MenuItem, direction: "up" | "down"): Promise<void> {
-    const currentIndex = items.findIndex((target) => target.id === item.id);
+    const currentIndex = adminMenuItems.findIndex((target) => target.id === item.id);
     const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= items.length) return;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= adminMenuItems.length) return;
 
-    const nextItems = [...items];
+    const nextItems = [...adminMenuItems];
     const [movingItem] = nextItems.splice(currentIndex, 1);
     if (!movingItem) return;
     nextItems.splice(nextIndex, 0, movingItem);
@@ -1284,7 +1323,8 @@ export default function App() {
       }
 
       const payload = (await response.json()) as ApiDataResponse<MenuItem[]>;
-      setItems(Array.isArray(payload?.data) ? payload.data : []);
+      setAdminMenuItems(Array.isArray(payload?.data) ? payload.data : []);
+      await refreshMenu();
       setMenuAdminMessage(`${item.name} 排序已更新`);
     } catch (reorderError) {
       setMenuAdminError(
@@ -1758,6 +1798,10 @@ export default function App() {
     try {
       if (!user) {
         throw new Error("Please login first");
+      }
+
+      if (item.isSoldOut || item.isHidden) {
+        throw new Error("MENU_ITEM_NOT_CURRENT");
       }
 
       const patchOrderItem = async (
@@ -3130,6 +3174,31 @@ export default function App() {
                   />
                 </label>
 
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="label cursor-pointer justify-start gap-3 rounded border border-base-300 px-3">
+                    <input
+                      checked={menuForm.is_sold_out}
+                      className="checkbox checkbox-warning checkbox-sm"
+                      onChange={(event) =>
+                        updateMenuFormField("is_sold_out", event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span className="label-text">售完</span>
+                  </label>
+                  <label className="label cursor-pointer justify-start gap-3 rounded border border-base-300 px-3">
+                    <input
+                      checked={menuForm.is_hidden}
+                      className="checkbox checkbox-sm"
+                      onChange={(event) =>
+                        updateMenuFormField("is_hidden", event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span className="label-text">隱藏</span>
+                  </label>
+                </div>
+
                 <div className="flex gap-2">
                   <button
                     className="btn btn-primary btn-sm flex-1"
@@ -3167,7 +3236,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item) => {
+                    {adminMenuItems.map((item) => {
                       const isExpanded = expandedHistoryId === item.logicalId;
                       const versions = historyByLogicalId[item.logicalId] ?? [];
 
@@ -3184,7 +3253,7 @@ export default function App() {
                                     className="btn btn-xs join-item"
                                     disabled={
                                       reorderingMenuId !== null ||
-                                      items.indexOf(item) === 0
+                                      adminMenuItems.indexOf(item) === 0
                                     }
                                     onClick={() => {
                                       void reorderMenuItem(item, "up");
@@ -3197,7 +3266,7 @@ export default function App() {
                                     className="btn btn-xs join-item"
                                     disabled={
                                       reorderingMenuId !== null ||
-                                      items.indexOf(item) === items.length - 1
+                                      adminMenuItems.indexOf(item) === adminMenuItems.length - 1
                                     }
                                     onClick={() => {
                                       void reorderMenuItem(item, "down");
@@ -3227,6 +3296,7 @@ export default function App() {
                             </td>
                             <td>${item.price}</td>
                             <td>
+                              <div className="flex flex-wrap gap-1">
                               {item.version > 1 ? (
                                 <span className="badge badge-warning">
                                   已調整
@@ -3236,6 +3306,17 @@ export default function App() {
                                   現行
                                 </span>
                               )}
+                                {item.isSoldOut ? (
+                                  <span className="badge badge-error">
+                                    售完
+                                  </span>
+                                ) : null}
+                                {item.isHidden ? (
+                                  <span className="badge badge-neutral">
+                                    隱藏
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                             <td>
                               <div className="flex justify-end gap-2">
@@ -3358,6 +3439,12 @@ export default function App() {
                           <span className="badge badge-info">
                             v{item.version}
                           </span>
+                          {item.isSoldOut ? (
+                            <span className="badge badge-error">售完</span>
+                          ) : null}
+                          {item.isSoldOut ? (
+                            <span className="badge badge-error">售完</span>
+                          ) : null}
                           {item.version > 1 ? (
                             <span className="badge badge-warning">
                               已調整
@@ -3377,9 +3464,11 @@ export default function App() {
                           onClick={() => {
                             void addToCart(item);
                           }}
-                          disabled={activeItemId === item.id}
+                          disabled={activeItemId === item.id || item.isSoldOut}
                         >
-                          {activeItemId === item.id
+                          {item.isSoldOut
+                            ? "已售完"
+                            : activeItemId === item.id
                             ? "加入中..."
                             : `加入購物車${cartQtyByItemId[item.id] ? ` (${cartQtyByItemId[item.id]})` : ""}`}
                         </button>

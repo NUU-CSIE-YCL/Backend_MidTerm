@@ -129,6 +129,10 @@ export class PgStore implements Store {
   // ── Menu ────────────────────────────────────────────────────
 
   getMenu(): ReadonlyArray<MenuItem> {
+    return this.menu.filter((item) => !item.isHidden);
+  }
+
+  getAdminMenu(): ReadonlyArray<MenuItem> {
     return this.menu;
   }
 
@@ -140,6 +144,8 @@ export class PgStore implements Store {
     description: string;
     image_url: string;
     display_order?: number;
+    is_sold_out?: boolean;
+    is_hidden?: boolean;
     change_reason?: string;
   }): Promise<MenuItem> {
     const created = await menuRepository.createMenuItem(input, "system");
@@ -156,6 +162,8 @@ export class PgStore implements Store {
       category?: string;
       description?: string;
       image_url?: string;
+      is_sold_out?: boolean;
+      is_hidden?: boolean;
       change_reason?: string;
     },
   ): Promise<MenuItem | null> {
@@ -338,7 +346,7 @@ export class PgStore implements Store {
 
     const menuItem = await menuRepository.getMenuVersion(input.itemId);
     if (!menuItem) return { ok: false, code: "MENU_ITEM_NOT_FOUND" };
-    if (!menuItem.isCurrentVersion)
+    if (!menuItem.isCurrentVersion || menuItem.isSoldOut || menuItem.isHidden)
       return { ok: false, code: "MENU_ITEM_NOT_CURRENT" };
 
     if (existingIdx !== -1) {
@@ -648,6 +656,8 @@ export class PgStore implements Store {
             description: item.description,
             imageUrl: item.image_url,
             displayOrder: index + 1,
+            isSoldOut: false,
+            isHidden: false,
             isCurrentVersion: true,
             changeReason: "Initial seed",
             createdBy: "system",
@@ -688,6 +698,8 @@ export class PgStore implements Store {
         description: menuItemsTable.description,
         imageUrl: menuItemsTable.imageUrl,
         displayOrder: menuItemsTable.displayOrder,
+        isSoldOut: menuItemsTable.isSoldOut,
+        isHidden: menuItemsTable.isHidden,
         isCurrentVersion: menuItemsTable.isCurrentVersion,
         supersedes: menuItemsTable.supersedes,
         changeReason: menuItemsTable.changeReason,
@@ -718,6 +730,8 @@ export class PgStore implements Store {
           description: row.description,
           image_url: row.imageUrl,
           displayOrder: row.displayOrder,
+          isSoldOut: row.isSoldOut,
+          isHidden: row.isHidden,
           isCurrentVersion: row.isCurrentVersion,
           supersedes: row.supersedes,
           changeReason: row.changeReason,

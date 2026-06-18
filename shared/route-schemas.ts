@@ -109,6 +109,8 @@ export const createMenuItemBodySchema = z.object({
   description: z.string().min(1),
   image_url: z.string().min(1),
   display_order: z.number().int().min(0).optional(),
+  is_sold_out: z.boolean().optional(),
+  is_hidden: z.boolean().optional(),
   change_reason: z.string().min(1).optional(),
 });
 
@@ -123,6 +125,8 @@ export const updateMenuItemBodySchema = z.object({
   category: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
   image_url: z.string().min(1).optional(),
+  is_sold_out: z.boolean().optional(),
+  is_hidden: z.boolean().optional(),
   change_reason: z.string().min(1).optional(),
 });
 

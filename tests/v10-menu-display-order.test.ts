@@ -20,6 +20,8 @@ function menuItem(id: string, displayOrder: number) {
     description: "Test item",
     image_url: "/imgs/menu/test.webp",
     displayOrder,
+    isSoldOut: false,
+    isHidden: false,
     isCurrentVersion: true,
   };
 }

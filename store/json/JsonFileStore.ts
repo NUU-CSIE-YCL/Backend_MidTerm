@@ -119,6 +119,8 @@ function createInitialMenuItem(
     description,
     image_url,
     displayOrder: Number.parseInt(logicalId, 10) || 0,
+    isSoldOut: false,
+    isHidden: false,
     isCurrentVersion: true,
     changeReason: "Initial seed",
     createdAt: new Date(0).toISOString(),
@@ -167,6 +169,8 @@ function normalizeMenuItem(
       typeof item.displayOrder === "number" && Number.isFinite(item.displayOrder)
         ? item.displayOrder
         : fallback,
+    isSoldOut: item.isSoldOut ?? false,
+    isHidden: item.isHidden ?? false,
     isCurrentVersion: item.isCurrentVersion ?? true,
     supersedes: item.supersedes,
     changeReason: item.changeReason,
@@ -309,6 +313,12 @@ export class JsonFileStore implements Store {
 
   getMenu(): ReadonlyArray<MenuItem> {
     return this.menu
+      .filter((item) => item.isCurrentVersion && !item.isHidden)
+      .sort(compareMenuItems);
+  }
+
+  getAdminMenu(): ReadonlyArray<MenuItem> {
+    return this.menu
       .filter((item) => item.isCurrentVersion)
       .sort(compareMenuItems);
   }
@@ -321,6 +331,8 @@ export class JsonFileStore implements Store {
     description: string;
     image_url: string;
     display_order?: number;
+    is_sold_out?: boolean;
+    is_hidden?: boolean;
     change_reason?: string;
   }): Promise<MenuItem> {
     const logicalId =
@@ -336,6 +348,8 @@ export class JsonFileStore implements Store {
       description: input.description,
       image_url: input.image_url,
       displayOrder: input.display_order ?? this.nextDisplayOrder(),
+      isSoldOut: input.is_sold_out ?? false,
+      isHidden: input.is_hidden ?? false,
       isCurrentVersion: true,
       changeReason: input.change_reason ?? "Initial creation",
       createdAt: new Date().toISOString(),
@@ -356,6 +370,8 @@ export class JsonFileStore implements Store {
       category?: string;
       description?: string;
       image_url?: string;
+      is_sold_out?: boolean;
+      is_hidden?: boolean;
       change_reason?: string;
     },
   ): Promise<MenuItem | null> {
@@ -377,6 +393,8 @@ export class JsonFileStore implements Store {
       description: patch.description ?? current.description,
       image_url: patch.image_url ?? current.image_url,
       displayOrder: current.displayOrder,
+      isSoldOut: patch.is_sold_out ?? current.isSoldOut,
+      isHidden: patch.is_hidden ?? current.isHidden,
       isCurrentVersion: true,
       supersedes: current.id,
       changeReason: patch.change_reason ?? "Menu item updated",
@@ -550,7 +568,7 @@ export class JsonFileStore implements Store {
     if (!menuItem) {
       return { ok: false, code: "MENU_ITEM_NOT_FOUND" };
     }
-    if (!menuItem.isCurrentVersion) {
+    if (!menuItem.isCurrentVersion || menuItem.isSoldOut || menuItem.isHidden) {
       return { ok: false, code: "MENU_ITEM_NOT_CURRENT" };
     }
 
@@ -604,7 +622,7 @@ export class JsonFileStore implements Store {
 
     const hasOutdatedItem = order.items.some((orderItem) => {
       const latest = this.menu.find((item) => item.id === orderItem.item.id);
-      return !latest?.isCurrentVersion;
+      return !latest?.isCurrentVersion || latest.isSoldOut || latest.isHidden;
     });
     if (hasOutdatedItem) {
       return { ok: false, code: "MENU_ITEM_NOT_CURRENT" };

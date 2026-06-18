@@ -64,6 +64,13 @@
       "when": 1781208000000,
       "tag": "0008_v10_menu_display_order",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781294400000,
+      "tag": "0009_v10_menu_availability",
+      "breakpoints": true
     }
   ]
 }

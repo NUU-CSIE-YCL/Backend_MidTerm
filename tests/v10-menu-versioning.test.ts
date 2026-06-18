@@ -21,6 +21,8 @@ describe("V10 menu versioning contracts", () => {
       description: "現煎雞蛋搭配火腿與生菜。",
       image_url: "/imgs/menu/ham-egg-toast.webp",
       displayOrder: 1,
+      isSoldOut: false,
+      isHidden: false,
       isCurrentVersion: true,
     });
 
@@ -78,6 +80,8 @@ describe("V10 menu versioning contracts", () => {
           description: "現煎雞蛋搭配火腿與生菜。",
           image_url: "/imgs/menu/ham-egg-toast.webp",
           displayOrder: 1,
+          isSoldOut: false,
+          isHidden: false,
           isCurrentVersion: true,
           supersedes: "001-01",
           changeReason: "原物料調價",
@@ -94,6 +98,8 @@ describe("V10 menu versioning contracts", () => {
           description: "現煎雞蛋搭配火腿與生菜。",
           image_url: "/imgs/menu/ham-egg-toast.webp",
           displayOrder: 1,
+          isSoldOut: false,
+          isHidden: false,
           isCurrentVersion: false,
           changeReason: "Initial seed",
           createdAt: new Date(0).toISOString(),

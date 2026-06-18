@@ -14,6 +14,8 @@ export interface CreateVersionedMenuItemInput {
   description: string;
   image_url: string;
   display_order?: number;
+  is_sold_out?: boolean;
+  is_hidden?: boolean;
   change_reason?: string;
 }
 
@@ -23,6 +25,8 @@ export interface UpdateVersionedMenuItemInput {
   category?: string;
   description?: string;
   image_url?: string;
+  is_sold_out?: boolean;
+  is_hidden?: boolean;
   change_reason?: string;
 }
 
@@ -38,6 +42,8 @@ export function toMenuItem(row: MenuRow): MenuItem {
     description: row.description,
     image_url: row.imageUrl,
     displayOrder: row.displayOrder,
+    isSoldOut: row.isSoldOut,
+    isHidden: row.isHidden,
     isCurrentVersion: row.isCurrentVersion,
     supersedes: row.supersedes,
     changeReason: row.changeReason,
@@ -63,6 +69,21 @@ export class MenuRepository {
       .select()
       .from(menuItemsTable)
       .where(eq(menuItemsTable.isCurrentVersion, true))
+      .orderBy(asc(menuItemsTable.displayOrder), asc(menuItemsTable.id));
+
+    return rows.map(toMenuItem);
+  }
+
+  async getPublicMenu(): Promise<MenuItem[]> {
+    const rows = await db
+      .select()
+      .from(menuItemsTable)
+      .where(
+        and(
+          eq(menuItemsTable.isCurrentVersion, true),
+          eq(menuItemsTable.isHidden, false),
+        ),
+      )
       .orderBy(asc(menuItemsTable.displayOrder), asc(menuItemsTable.id));
 
     return rows.map(toMenuItem);
@@ -131,6 +152,8 @@ export class MenuRepository {
           imageUrl: input.image_url,
           displayOrder:
             input.display_order ?? (await this.nextDisplayOrder(tx)),
+          isSoldOut: input.is_sold_out ?? false,
+          isHidden: input.is_hidden ?? false,
           isCurrentVersion: true,
           changeReason: input.change_reason ?? "Initial creation",
           createdBy,
@@ -170,6 +193,8 @@ export class MenuRepository {
           description: patch.description ?? current.description,
           imageUrl: patch.image_url ?? current.imageUrl,
           displayOrder: current.displayOrder,
+          isSoldOut: patch.is_sold_out ?? current.isSoldOut,
+          isHidden: patch.is_hidden ?? current.isHidden,
           isCurrentVersion: true,
           supersedes: current.id,
           changeReason: patch.change_reason ?? "Menu item updated",
@@ -212,6 +237,8 @@ export class MenuRepository {
       .select({
         id: menuItemsTable.id,
         isCurrentVersion: menuItemsTable.isCurrentVersion,
+        isSoldOut: menuItemsTable.isSoldOut,
+        isHidden: menuItemsTable.isHidden,
       })
       .from(menuItemsTable)
       .where(inArray(menuItemsTable.id, uniqueIds));
@@ -219,7 +246,7 @@ export class MenuRepository {
     const foundIds = new Set(rows.map((row) => row.id));
     const outdatedIds = [
       ...rows
-        .filter((row) => !row.isCurrentVersion)
+        .filter((row) => !row.isCurrentVersion || row.isSoldOut || row.isHidden)
         .map((row) => row.id),
       ...uniqueIds.filter((id) => !foundIds.has(id)),
     ];
