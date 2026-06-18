@@ -69,14 +69,17 @@ describe("V10.3 menu A/B metadata contracts", () => {
         {
           variant: "A",
           itemCount: 1,
+          exposureCount: 8,
           orderCount: 2,
           quantitySold: 4,
           revenue: 320,
+          conversionRate: 0.25,
         },
       ],
     });
 
     expect(experiment.variants[0]?.revenue).toBe(320);
+    expect(experiment.variants[0]?.exposureCount).toBe(8);
     expect(
       menuExperimentListResponseSchema.parse({ data: [experiment] }).data[0]
         ?.experimentKey,

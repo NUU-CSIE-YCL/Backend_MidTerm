@@ -15,6 +15,7 @@ import {
   currentUserResponseSchema,
   deleteMenuItemParamsSchema,
   experimentedMenuQuerySchema,
+  getMenuExperimentParamsSchema,
   getMenuHistoryParamsSchema,
   getMenuPriceAnalysisParamsSchema,
   getOrderByIdParamsSchema,
@@ -23,6 +24,7 @@ import {
   listRoleRequestsQuerySchema,
   menuHistoryResponseSchema,
   menuExperimentListResponseSchema,
+  menuExperimentDetailResponseSchema,
   menuItemResponseSchema,
   menuListResponseSchema,
   menuPriceAnalysisResponseSchema,
@@ -945,10 +947,16 @@ app.get("/api/menu", () => ({ data: [...store.getMenu()] }), {
 
 app.get(
   "/api/menu/experimented",
-  ({ query }) => {
+  async ({ query }) => {
     const visitorKey = (query as { visitorKey: string }).visitorKey;
+    const selectedMenu = selectExperimentedMenuItems(store.getMenu(), visitorKey);
+    try {
+      await store.recordMenuExperimentExposures(visitorKey, selectedMenu);
+    } catch (error) {
+      console.warn("[experiments] exposure recording failed", error);
+    }
     return {
-      data: selectExperimentedMenuItems(store.getMenu(), visitorKey),
+      data: selectedMenu,
     };
   },
   {
@@ -1070,6 +1078,36 @@ app.get(
       200: menuExperimentListResponseSchema,
       401: apiErrorResponseSchema,
       403: apiErrorResponseSchema,
+    },
+  },
+);
+
+app.get(
+  "/api/menu/experiments/:experimentKey",
+  async ({ params, request, set }) => {
+    await requireUserWithAnyRole(request, menuManagerRoles);
+    const detail = store.getMenuExperimentDetail(params.experimentKey);
+
+    if (!detail) {
+      set.status = 404;
+      return { error: "Menu experiment not found" };
+    }
+
+    return { data: detail };
+  },
+  {
+    params: getMenuExperimentParamsSchema,
+    detail: {
+      tags: ["menu"],
+      summary: "Get menu experiment detail",
+      description:
+        "Return exposure and sales analytics for one owner/admin-only A/B test.",
+    },
+    response: {
+      200: menuExperimentDetailResponseSchema,
+      401: apiErrorResponseSchema,
+      403: apiErrorResponseSchema,
+      404: apiErrorResponseSchema,
     },
   },
 );

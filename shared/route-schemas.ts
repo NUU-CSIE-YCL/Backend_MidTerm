@@ -3,6 +3,7 @@ import type { Order } from "./contracts.ts";
 import {
   adminUserSchema,
   menuExperimentSchema,
+  menuExperimentDetailSchema,
   menuItemSchema,
   menuPriceAnalysisSchema,
   menuVersionLevelSchema,
@@ -66,6 +67,10 @@ export const menuPriceAnalysisResponseSchema = z.object({
 
 export const menuExperimentListResponseSchema = z.object({
   data: z.array(menuExperimentSchema),
+});
+
+export const menuExperimentDetailResponseSchema = z.object({
+  data: menuExperimentDetailSchema,
 });
 
 export const experimentedMenuQuerySchema = z.object({
@@ -206,6 +211,11 @@ export const getMenuHistoryParamsSchema = z.object({
 /** GET /api/menu/:id/price-analysis */
 export const getMenuPriceAnalysisParamsSchema = z.object({
   id: z.string().min(1),
+});
+
+/** GET /api/menu/experiments/:experimentKey */
+export const getMenuExperimentParamsSchema = z.object({
+  experimentKey: z.string().trim().min(1).max(80),
 });
 
 /** GET /api/orders/:id */

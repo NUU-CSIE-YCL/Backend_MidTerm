@@ -92,6 +92,13 @@
       "when": 1781553600000,
       "tag": "0012_v10_menu_ab_test_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1781640000000,
+      "tag": "0013_v10_menu_experiment_exposures",
+      "breakpoints": true
     }
   ]
 }

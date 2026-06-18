@@ -159,11 +159,27 @@ export const menuExperimentSchema = z.object({
     z.object({
       variant: z.string().min(1),
       itemCount: z.number().int().min(0),
+      exposureCount: z.number().int().min(0),
       orderCount: z.number().int().min(0),
       quantitySold: z.number().int().min(0),
       revenue: z.number().min(0),
+      conversionRate: z.number().min(0),
+      lastExposedAt: z.string().min(1).nullable().optional(),
     }),
   ),
+});
+
+export const menuExperimentExposureSchema = z.object({
+  id: z.number().int().min(1).optional(),
+  visitorKey: z.string().min(1),
+  experimentKey: z.string().min(1),
+  experimentVariant: z.string().min(1),
+  menuItemId: z.string().min(1),
+  exposedAt: z.string().min(1).optional(),
+});
+
+export const menuExperimentDetailSchema = menuExperimentSchema.extend({
+  exposures: z.array(menuExperimentExposureSchema),
 });
 
 export const roleRequestSchema = z.object({
@@ -219,6 +235,10 @@ export type MenuPriceAnalysisVersion = z.infer<
   typeof menuPriceAnalysisVersionSchema
 >;
 export type MenuExperiment = z.infer<typeof menuExperimentSchema>;
+export type MenuExperimentExposure = z.infer<
+  typeof menuExperimentExposureSchema
+>;
+export type MenuExperimentDetail = z.infer<typeof menuExperimentDetailSchema>;
 export type RoleRequest = z.infer<typeof roleRequestSchema>;
 export type RoleAuditLog = z.infer<typeof roleAuditLogSchema>;
 

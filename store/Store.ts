@@ -1,5 +1,7 @@
 import type {
   MenuExperiment,
+  MenuExperimentDetail,
+  MenuExperimentExposure,
   MenuItem,
   MenuPriceAnalysis,
   MenuVersionLevel,
@@ -90,6 +92,13 @@ export interface Store {
   getMenuHistory(menuId: string): Promise<ReadonlyArray<MenuItem>>;
   getMenuPriceAnalysis(menuId: string): Promise<MenuPriceAnalysis | null>;
   getMenuExperiments(): ReadonlyArray<MenuExperiment>;
+  getMenuExperimentDetail(
+    experimentKey: string,
+  ): MenuExperimentDetail | undefined;
+  recordMenuExperimentExposures(
+    visitorKey: string,
+    menuItems: readonly MenuItem[],
+  ): Promise<ReadonlyArray<MenuExperimentExposure>>;
 
   getOrders(): ReadonlyArray<Order>;
   getWorkbenchOrders(): ReadonlyArray<Order>;

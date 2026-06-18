@@ -1,5 +1,20 @@
 # AGENTS.md
 
+## 最新交接摘要：V10.3F A/B 測試曝光與轉換統計
+
+- 本輪已實作 `V10.3F A/B 測試曝光與轉換統計`，延伸既有 `V10.3E A/B 穩定分流`。
+- 新增 migration：`drizzle-v10/0013_v10_menu_experiment_exposures.sql`。
+- 新表：`menu_experiment_exposures`，紀錄 `visitor_key`、`experiment_key`、`experiment_variant`、`menu_item_id`、`exposed_at`。
+- 同一 visitor / experiment / variant / menu item 只記一次曝光，避免重新整理或 polling 灌爆曝光數。
+- `GET /api/menu/experimented?visitorKey=...` 維持公開可讀，並會安全寫入實際顯示 variant 的曝光紀錄；寫入失敗不影響顧客看菜單或下單。
+- `GET /api/menu/experiments` 的 variant 統計已包含 `exposureCount`、`orderCount`、`quantitySold`、`revenue`、`conversionRate`、`lastExposedAt`。
+- 新增 `GET /api/menu/experiments/:experimentKey`，owner/admin 可查看單一實驗詳情與曝光 rows。
+- 前端 owner/admin 的 A/B 測試摘要已補曝光數、轉換率與「查看詳情」。
+- PgStore 與 JSON fallback store 都支援曝光紀錄。
+- 新增測試：`tests/v10-menu-experiment-analytics.test.ts`。
+- 本機驗證已通過：`bun test`、`bun run build`、入口檔 TypeScript check。
+- Render 驗證重點：migration log 出現 `0013_v10_menu_experiment_exposures`；customer 開菜單後 A/B 曝光數增加；下單後訂單、銷售份數與營收統計更新。
+
 ## 最新交接摘要：V10.3G + V10.3E
 
 - 使用者已回報上一輪 `V10.3 菜單版本化進階功能` 已通過 Render 驗證，但前端管理區仍有部分英文文案。

@@ -108,6 +108,35 @@ export const orderItemsTable = appSchema.table(
   }),
 );
 
+export const menuExperimentExposuresTable = appSchema.table(
+  "menu_experiment_exposures",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    visitorKey: text("visitor_key").notNull(),
+    experimentKey: text("experiment_key").notNull(),
+    experimentVariant: text("experiment_variant").notNull(),
+    menuItemId: text("menu_item_id")
+      .notNull()
+      .references(() => menuItemsTable.id, { onDelete: "cascade" }),
+    exposedAt: timestamp("exposed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    menuExperimentExposureUniqueIdx: uniqueIndex(
+      "menu_experiment_exposures_unique_idx",
+    ).on(
+      table.visitorKey,
+      table.experimentKey,
+      table.experimentVariant,
+      table.menuItemId,
+    ),
+    menuExperimentExposureExperimentIdx: index(
+      "menu_experiment_exposures_experiment_idx",
+    ).on(table.experimentKey),
+  }),
+);
+
 export const roleRequestsTable = appSchema.table(
   "role_requests",
   {

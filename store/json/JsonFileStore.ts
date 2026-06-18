@@ -1,6 +1,8 @@
 import { mkdir, rename } from "node:fs/promises";
 import type {
   MenuExperiment,
+  MenuExperimentDetail,
+  MenuExperimentExposure,
   MenuItem,
   MenuPriceAnalysis,
   Order,
@@ -10,6 +12,10 @@ import type {
   Role,
   MenuVersionLevel,
 } from "../../shared/contracts.ts";
+import {
+  buildMenuExperimentDetail,
+  buildMenuExperiments,
+} from "../../shared/menu-experiment-analytics.ts";
 import type { Store } from "../Store.ts";
 
 interface StoredUser {
@@ -23,6 +29,7 @@ interface DataStore {
   users: StoredUser[];
   menu: MenuItem[];
   orders: Order[];
+  menuExperimentExposures: MenuExperimentExposure[];
   userIdCounter: number;
   menuIdCounter: number;
   orderIdCounter: number;
@@ -318,6 +325,7 @@ export class JsonFileStore implements Store {
   private users: StoredUser[] = [];
   private menu: MenuItem[] = [];
   private orders: Order[] = [];
+  private menuExperimentExposures: MenuExperimentExposure[] = [];
   private userIdCounter = 0;
   private menuIdCounter = 0;
   private orderIdCounter = 0;
@@ -388,6 +396,32 @@ export class JsonFileStore implements Store {
               ? order.submittedAt
               : undefined,
         })),
+        menuExperimentExposures: Array.isArray(
+          parsed.menuExperimentExposures,
+        )
+          ? parsed.menuExperimentExposures
+              .filter(
+                (exposure): exposure is MenuExperimentExposure =>
+                  typeof exposure.visitorKey === "string" &&
+                  typeof exposure.experimentKey === "string" &&
+                  typeof exposure.experimentVariant === "string" &&
+                  typeof exposure.menuItemId === "string",
+              )
+              .map((exposure, index) => ({
+                id:
+                  typeof exposure.id === "number" && exposure.id > 0
+                    ? exposure.id
+                    : index + 1,
+                visitorKey: exposure.visitorKey,
+                experimentKey: exposure.experimentKey,
+                experimentVariant: exposure.experimentVariant,
+                menuItemId: exposure.menuItemId,
+                exposedAt:
+                  typeof exposure.exposedAt === "string"
+                    ? exposure.exposedAt
+                    : new Date(0).toISOString(),
+              }))
+          : [],
         userIdCounter: parsed.userIdCounter ?? 0,
         menuIdCounter: parsed.menuIdCounter ?? 0,
         orderIdCounter: parsed.orderIdCounter ?? 0,
@@ -618,53 +652,57 @@ export class JsonFileStore implements Store {
   }
 
   getMenuExperiments(): ReadonlyArray<MenuExperiment> {
-    const groups = new Map<
-      string,
-      Map<string, { itemCount: number; orderIds: Set<number>; quantitySold: number; revenue: number }>
-    >();
+    return buildMenuExperiments(
+      this.menu,
+      this.orders,
+      this.menuExperimentExposures,
+    );
+  }
 
-    for (const item of this.menu.filter((entry) => entry.isCurrentVersion)) {
+  getMenuExperimentDetail(
+    experimentKey: string,
+  ): MenuExperimentDetail | undefined {
+    return buildMenuExperimentDetail(
+      experimentKey,
+      this.menu,
+      this.orders,
+      this.menuExperimentExposures,
+    );
+  }
+
+  async recordMenuExperimentExposures(
+    visitorKey: string,
+    menuItems: readonly MenuItem[],
+  ): Promise<ReadonlyArray<MenuExperimentExposure>> {
+    const now = new Date().toISOString();
+    const created: MenuExperimentExposure[] = [];
+
+    for (const item of menuItems) {
       if (!item.experimentKey || !item.experimentVariant) continue;
-      const variants = groups.get(item.experimentKey) ?? new Map();
-      const stats =
-        variants.get(item.experimentVariant) ??
-        { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
-      stats.itemCount += 1;
-      variants.set(item.experimentVariant, stats);
-      groups.set(item.experimentKey, variants);
+      const exists = this.menuExperimentExposures.some(
+        (exposure) =>
+          exposure.visitorKey === visitorKey &&
+          exposure.experimentKey === item.experimentKey &&
+          exposure.experimentVariant === item.experimentVariant &&
+          exposure.menuItemId === item.id,
+      );
+      if (exists) continue;
+
+      const exposure: MenuExperimentExposure = {
+        id: this.menuExperimentExposures.length + created.length + 1,
+        visitorKey,
+        experimentKey: item.experimentKey,
+        experimentVariant: item.experimentVariant,
+        menuItemId: item.id,
+        exposedAt: now,
+      };
+      created.push(exposure);
     }
 
-    for (const order of this.orders.filter((entry) => entry.status !== "pending")) {
-      for (const orderItem of order.items) {
-        const key = orderItem.item.experimentKey;
-        const variant = orderItem.item.experimentVariant;
-        if (!key || !variant) continue;
-        const variants = groups.get(key) ?? new Map();
-        const stats =
-          variants.get(variant) ??
-          { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
-        stats.orderIds.add(order.id);
-        stats.quantitySold += orderItem.qty;
-        stats.revenue += getEffectiveMenuPrice(orderItem.item) * orderItem.qty;
-        variants.set(variant, stats);
-        groups.set(key, variants);
-      }
-    }
-
-    return [...groups.entries()]
-      .map(([experimentKey, variants]) => ({
-        experimentKey,
-        variants: [...variants.entries()]
-          .map(([variant, stats]) => ({
-            variant,
-            itemCount: stats.itemCount,
-            orderCount: stats.orderIds.size,
-            quantitySold: stats.quantitySold,
-            revenue: stats.revenue,
-          }))
-          .sort((a, b) => a.variant.localeCompare(b.variant)),
-      }))
-      .sort((a, b) => a.experimentKey.localeCompare(b.experimentKey));
+    if (created.length === 0) return [];
+    this.menuExperimentExposures.push(...created);
+    await this.persist();
+    return created;
   }
 
   getOrders(): ReadonlyArray<Order> {
@@ -1002,6 +1040,7 @@ export class JsonFileStore implements Store {
       users: cloneDefaultUsers(),
       menu: cloneDefaultMenu(),
       orders: [],
+      menuExperimentExposures: [],
       userIdCounter: defaultUsers.length,
       menuIdCounter: defaultMenu.length,
       orderIdCounter: 0,
@@ -1012,6 +1051,7 @@ export class JsonFileStore implements Store {
     this.users = store.users;
     this.menu = store.menu;
     this.orders = store.orders;
+    this.menuExperimentExposures = store.menuExperimentExposures;
     this.sortMenu();
 
     const maxUserId = this.users.reduce((max, user) => {
@@ -1050,6 +1090,7 @@ export class JsonFileStore implements Store {
       users: this.users,
       menu: this.menu,
       orders: this.orders,
+      menuExperimentExposures: this.menuExperimentExposures,
       userIdCounter: this.userIdCounter,
       menuIdCounter: this.menuIdCounter,
       orderIdCounter: this.orderIdCounter,

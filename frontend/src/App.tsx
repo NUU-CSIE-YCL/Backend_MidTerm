@@ -17,6 +17,7 @@ import type {
   AdminUser,
   ApiDataResponse,
   MenuExperiment,
+  MenuExperimentDetail,
   MenuItem,
   MenuPriceAnalysis,
   MenuVersionLevel,
@@ -429,6 +430,10 @@ export default function App() {
     useState<string | null>(null);
   const [menuExperiments, setMenuExperiments] = useState<MenuExperiment[]>([]);
   const [menuExperimentsLoading, setMenuExperimentsLoading] = useState(false);
+  const [menuExperimentDetail, setMenuExperimentDetail] =
+    useState<MenuExperimentDetail | null>(null);
+  const [menuExperimentDetailLoadingKey, setMenuExperimentDetailLoadingKey] =
+    useState<string | null>(null);
   const [roleRequestForm, setRoleRequestForm] = useState<{
     requestedRole: RequestableRole;
     reason: string;
@@ -1336,6 +1341,33 @@ export default function App() {
       console.error(experimentError);
     } finally {
       if (showLoading) setMenuExperimentsLoading(false);
+    }
+  }
+
+  async function loadMenuExperimentDetail(
+    experimentKey: string,
+  ): Promise<void> {
+    if (!user || !hasAnyRole(user, menuManagerRoles)) return;
+    setMenuExperimentDetailLoadingKey(experimentKey);
+
+    try {
+      const response = await fetch(
+        buildApiUrl(
+          `/api/menu/experiments/${encodeURIComponent(experimentKey)}`,
+        ),
+        { credentials: "include" },
+      );
+      if (!response.ok) {
+        throw new Error(`載入 A/B 測試詳情失敗：HTTP ${response.status}`);
+      }
+      const payload =
+        (await response.json()) as ApiDataResponse<MenuExperimentDetail>;
+      setMenuExperimentDetail(payload.data);
+    } catch (experimentError) {
+      setMenuAdminError("A/B 測試詳情載入失敗，請稍後再試。");
+      console.error(experimentError);
+    } finally {
+      setMenuExperimentDetailLoadingKey(null);
     }
   }
 
@@ -3879,8 +3911,28 @@ export default function App() {
                       className="rounded border border-base-300 p-3"
                       key={experiment.experimentKey}
                     >
-                      <div className="mb-2 font-semibold">
-                        {experiment.experimentKey}
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold">
+                          {experiment.experimentKey}
+                        </span>
+                        <button
+                          className="btn btn-xs btn-outline"
+                          disabled={
+                            menuExperimentDetailLoadingKey ===
+                            experiment.experimentKey
+                          }
+                          onClick={() => {
+                            void loadMenuExperimentDetail(
+                              experiment.experimentKey,
+                            );
+                          }}
+                          type="button"
+                        >
+                          {menuExperimentDetailLoadingKey ===
+                          experiment.experimentKey
+                            ? "載入中..."
+                            : "查看詳情"}
+                        </button>
                       </div>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {experiment.variants.map((variant) => (
@@ -3899,10 +3951,79 @@ export default function App() {
                           </div>
                         ))}
                       </div>
+                      <div className="mt-2 text-xs opacity-70">
+                        總曝光{" "}
+                        {experiment.variants.reduce(
+                          (sum, variant) => sum + variant.exposureCount,
+                          0,
+                        )}{" "}
+                        次 / 平均轉換率{" "}
+                        {experiment.variants.some(
+                          (variant) => variant.exposureCount > 0,
+                        )
+                          ? `${(
+                              (experiment.variants.reduce(
+                                (sum, variant) =>
+                                  sum + variant.conversionRate,
+                                0,
+                              ) /
+                                experiment.variants.length) *
+                              100
+                            ).toFixed(1)}%`
+                          : "尚無曝光資料"}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
+              {menuExperimentDetail ? (
+                <div className="mt-4 rounded border border-base-300 bg-base-200 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="font-semibold">
+                      {menuExperimentDetail.experimentKey} 詳情
+                    </h3>
+                    <button
+                      className="btn btn-xs btn-ghost"
+                      onClick={() => setMenuExperimentDetail(null)}
+                      type="button"
+                    >
+                      關閉
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="table table-xs">
+                      <thead>
+                        <tr>
+                          <th>版本</th>
+                          <th>品項</th>
+                          <th>曝光</th>
+                          <th>訂單</th>
+                          <th>銷售份數</th>
+                          <th>營收</th>
+                          <th>轉換率</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {menuExperimentDetail.variants.map((variant) => (
+                          <tr key={variant.variant}>
+                            <td>{variant.variant}</td>
+                            <td>{variant.itemCount}</td>
+                            <td>{variant.exposureCount}</td>
+                            <td>{variant.orderCount}</td>
+                            <td>{variant.quantitySold}</td>
+                            <td>${variant.revenue}</td>
+                            <td>
+                              {variant.exposureCount > 0
+                                ? `${(variant.conversionRate * 100).toFixed(1)}%`
+                                : "尚無曝光資料"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
             </div>
             </section>
           </CollapsibleSection>

@@ -1,6 +1,8 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type {
   MenuExperiment,
+  MenuExperimentDetail,
+  MenuExperimentExposure,
   MenuItem,
   MenuPriceAnalysis,
   MenuVersionLevel,
@@ -16,10 +18,15 @@ import {
   toMenuItem,
 } from "../../db/repositories/menuRepository.ts";
 import {
+  menuExperimentExposuresTable,
   menuItemsTable,
   orderItemsTable,
   ordersTable,
 } from "../../db/schema.ts";
+import {
+  buildMenuExperimentDetail,
+  buildMenuExperiments,
+} from "../../shared/menu-experiment-analytics.ts";
 import type { Store } from "../Store.ts";
 
 interface PgStoreOptions {
@@ -160,6 +167,7 @@ export class PgStore implements Store {
   private readonly dataFilePath: string;
   private menu: MenuItem[] = [];
   private orders: Order[] = [];
+  private menuExperimentExposures: MenuExperimentExposure[] = [];
 
   constructor(options: PgStoreOptions = {}) {
     this.dataFilePath = options.dataFilePath ?? "./data/store.json";
@@ -288,53 +296,64 @@ export class PgStore implements Store {
   }
 
   getMenuExperiments(): ReadonlyArray<MenuExperiment> {
-    const groups = new Map<
-      string,
-      Map<string, { itemCount: number; orderIds: Set<number>; quantitySold: number; revenue: number }>
-    >();
+    return buildMenuExperiments(
+      this.menu,
+      this.orders,
+      this.menuExperimentExposures,
+    );
+  }
 
-    for (const item of this.menu) {
-      if (!item.experimentKey || !item.experimentVariant) continue;
-      const variants = groups.get(item.experimentKey) ?? new Map();
-      const stats =
-        variants.get(item.experimentVariant) ??
-        { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
-      stats.itemCount += 1;
-      variants.set(item.experimentVariant, stats);
-      groups.set(item.experimentKey, variants);
-    }
+  getMenuExperimentDetail(
+    experimentKey: string,
+  ): MenuExperimentDetail | undefined {
+    return buildMenuExperimentDetail(
+      experimentKey,
+      this.menu,
+      this.orders,
+      this.menuExperimentExposures,
+    );
+  }
 
-    for (const order of this.orders.filter((entry) => entry.status !== "pending")) {
-      for (const orderItem of order.items) {
-        const key = orderItem.item.experimentKey;
-        const variant = orderItem.item.experimentVariant;
-        if (!key || !variant) continue;
-        const variants = groups.get(key) ?? new Map();
-        const stats =
-          variants.get(variant) ??
-          { itemCount: 0, orderIds: new Set<number>(), quantitySold: 0, revenue: 0 };
-        stats.orderIds.add(order.id);
-        stats.quantitySold += orderItem.qty;
-        stats.revenue += getEffectiveMenuPrice(orderItem.item) * orderItem.qty;
-        variants.set(variant, stats);
-        groups.set(key, variants);
-      }
-    }
+  async recordMenuExperimentExposures(
+    visitorKey: string,
+    menuItems: readonly MenuItem[],
+  ): Promise<ReadonlyArray<MenuExperimentExposure>> {
+    const exposedAt = new Date();
+    const exposureInputs = menuItems
+      .filter((item) => item.experimentKey && item.experimentVariant)
+      .map((item) => ({
+        visitorKey,
+        experimentKey: item.experimentKey,
+        experimentVariant: item.experimentVariant,
+        menuItemId: item.id,
+        exposedAt,
+      }));
 
-    return [...groups.entries()]
-      .map(([experimentKey, variants]) => ({
-        experimentKey,
-        variants: [...variants.entries()]
-          .map(([variant, stats]) => ({
-            variant,
-            itemCount: stats.itemCount,
-            orderCount: stats.orderIds.size,
-            quantitySold: stats.quantitySold,
-            revenue: stats.revenue,
-          }))
-          .sort((a, b) => a.variant.localeCompare(b.variant)),
-      }))
-      .sort((a, b) => a.experimentKey.localeCompare(b.experimentKey));
+    if (exposureInputs.length === 0) return [];
+
+    await db
+      .insert(menuExperimentExposuresTable)
+      .values(exposureInputs)
+      .onConflictDoNothing({
+        target: [
+          menuExperimentExposuresTable.visitorKey,
+          menuExperimentExposuresTable.experimentKey,
+          menuExperimentExposuresTable.experimentVariant,
+          menuExperimentExposuresTable.menuItemId,
+        ],
+      });
+
+    await this.reloadMenuExperimentExposures();
+    return this.menuExperimentExposures.filter(
+      (exposure) =>
+        exposure.visitorKey === visitorKey &&
+        exposureInputs.some(
+          (input) =>
+            input.experimentKey === exposure.experimentKey &&
+            input.experimentVariant === exposure.experimentVariant &&
+            input.menuItemId === exposure.menuItemId,
+        ),
+    );
   }
 
   // ── Orders ──────────────────────────────────────────────────
@@ -934,6 +953,26 @@ export class PgStore implements Store {
         : undefined,
     }));
     this.sortMenu();
+    await this.reloadMenuExperimentExposures();
+  }
+
+  private async reloadMenuExperimentExposures(): Promise<void> {
+    const exposureRows = await db
+      .select()
+      .from(menuExperimentExposuresTable)
+      .orderBy(desc(menuExperimentExposuresTable.exposedAt));
+
+    this.menuExperimentExposures = exposureRows.map((row) => ({
+      id: row.id,
+      visitorKey: row.visitorKey,
+      experimentKey: row.experimentKey,
+      experimentVariant: row.experimentVariant,
+      menuItemId: row.menuItemId,
+      exposedAt:
+        row.exposedAt instanceof Date
+          ? row.exposedAt.toISOString()
+          : new Date(row.exposedAt).toISOString(),
+    }));
   }
 
   private sortMenu(): void {
