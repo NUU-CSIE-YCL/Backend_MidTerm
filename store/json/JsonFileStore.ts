@@ -16,6 +16,7 @@ import {
   buildMenuExperimentDetail,
   buildMenuExperiments,
 } from "../../shared/menu-experiment-analytics.ts";
+import { attachMenuSalesStats } from "../../shared/menu-sales-stats.ts";
 import type { Store } from "../Store.ts";
 
 interface StoredUser {
@@ -53,7 +54,8 @@ function cloneDefaultMenu(): MenuItem[] {
 function calculateOrderTotal(items: OrderItem[]): number {
   return items.reduce((sum, orderItem) => {
     const unitPrice = orderItem.item.salePrice ?? orderItem.item.price;
-    return sum + unitPrice * orderItem.qty;
+    const addonPrice = orderItem.addEgg ? 15 : 0;
+    return sum + (unitPrice + addonPrice) * orderItem.qty;
   }, 0);
 }
 
@@ -198,6 +200,8 @@ function createInitialMenuItem(
     isHidden: false,
     experimentKey: "",
     experimentVariant: "",
+    purchaseCountToday: 0,
+    purchaseCountThisWeek: 0,
     isCurrentVersion: true,
     changeReason: "Initial seed",
     createdAt: new Date(0).toISOString(),
@@ -267,6 +271,12 @@ function normalizeMenuItem(
       typeof item.experimentKey === "string" ? item.experimentKey : "",
     experimentVariant:
       typeof item.experimentVariant === "string" ? item.experimentVariant : "",
+    purchaseCountToday:
+      typeof item.purchaseCountToday === "number" ? item.purchaseCountToday : 0,
+    purchaseCountThisWeek:
+      typeof item.purchaseCountThisWeek === "number"
+        ? item.purchaseCountThisWeek
+        : 0,
     isCurrentVersion: item.isCurrentVersion ?? true,
     supersedes: item.supersedes,
     changeReason: item.changeReason,
@@ -369,6 +379,8 @@ export class JsonFileStore implements Store {
           userId: normalizeUserId(order.userId ?? fallbackUserId),
           customerNote:
             typeof order.customerNote === "string" ? order.customerNote : "",
+          pickupTime:
+            typeof order.pickupTime === "string" ? order.pickupTime : "",
           paymentStatus: normalizePaymentStatus(order.paymentStatus),
           paidBy:
             typeof order.paidBy === "string" ? order.paidBy : null,
@@ -389,6 +401,7 @@ export class JsonFileStore implements Store {
           items: order.items.map((orderItem) => ({
             ...orderItem,
             item: normalizeMenuItem(orderItem.item),
+            addEgg: orderItem.addEgg === true,
           })),
           status: normalizeOrderStatus(order.status),
           submittedAt:
@@ -435,15 +448,19 @@ export class JsonFileStore implements Store {
   }
 
   getMenu(): ReadonlyArray<MenuItem> {
-    return this.menu
-      .filter((item) => item.isCurrentVersion && !item.isHidden)
-      .sort(compareMenuItems);
+    return attachMenuSalesStats(
+      this.menu
+        .filter((item) => item.isCurrentVersion && !item.isHidden)
+        .sort(compareMenuItems),
+      this.orders,
+    );
   }
 
   getAdminMenu(): ReadonlyArray<MenuItem> {
-    return this.menu
-      .filter((item) => item.isCurrentVersion)
-      .sort(compareMenuItems);
+    return attachMenuSalesStats(
+      this.menu.filter((item) => item.isCurrentVersion).sort(compareMenuItems),
+      this.orders,
+    );
   }
 
   async createMenuItem(input: {
@@ -757,6 +774,7 @@ export class JsonFileStore implements Store {
       refundReason: "",
       refundedBy: null,
       customerNote: "",
+      pickupTime: "",
       cancelReason: "",
       cancelledBy: null,
       createdAt: new Date().toISOString(),
@@ -774,6 +792,7 @@ export class JsonFileStore implements Store {
       userId: string;
       itemId: string;
       qty: number;
+      addEgg?: boolean;
     },
   ): Promise<
     | { ok: true; order: Order }
@@ -827,9 +846,14 @@ export class JsonFileStore implements Store {
 
       if (existingOrderItem) {
         existingOrderItem.qty = input.qty;
+        existingOrderItem.addEgg = input.addEgg ?? false;
       }
     } else {
-      order.items.push({ item: menuItem, qty: input.qty });
+      order.items.push({
+        item: menuItem,
+        qty: input.qty,
+        addEgg: input.addEgg ?? false,
+      });
     }
 
     order.total = calculateOrderTotal(order.items);
@@ -840,7 +864,7 @@ export class JsonFileStore implements Store {
 
   async submitOrder(
     orderId: number,
-    input: { userId: string; customerNote?: string },
+    input: { userId: string; customerNote?: string; pickupTime?: string },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -880,6 +904,7 @@ export class JsonFileStore implements Store {
 
     order.status = "submitted";
     order.customerNote = (input.customerNote ?? "").trim();
+    order.pickupTime = (input.pickupTime ?? "").trim();
     order.submittedAt = new Date().toISOString();
     await this.persist();
 

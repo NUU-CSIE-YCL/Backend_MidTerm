@@ -112,13 +112,14 @@ export interface Store {
       userId: string;
       itemId: string;
       qty: number;
+      addEgg?: boolean;
     },
   ): Promise<
     { ok: true; order: Order } | { ok: false; code: UpdateOrderItemErrorCode }
   >;
   submitOrder(
     orderId: number,
-    input: { userId: string; customerNote?: string },
+    input: { userId: string; customerNote?: string; pickupTime?: string },
   ): Promise<
     { ok: true; order: Order } | { ok: false; code: SubmitOrderErrorCode }
   >;

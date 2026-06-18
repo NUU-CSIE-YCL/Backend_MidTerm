@@ -81,6 +81,7 @@ export const ordersTable = appSchema.table("orders", {
   refundedBy: text("refunded_by").references(() => user.id),
   refundedAt: timestamp("refunded_at", { withTimezone: true }),
   customerNote: text("customer_note").notNull().default(""),
+  pickupTime: text("pickup_time").notNull().default(""),
   cancelReason: text("cancel_reason").notNull().default(""),
   cancelledBy: text("cancelled_by").references(() => user.id),
   cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
@@ -99,6 +100,7 @@ export const orderItemsTable = appSchema.table(
       .notNull()
       .references(() => menuItemsTable.id),
     qty: integer("qty").notNull(),
+    addEgg: boolean("add_egg").notNull().default(false),
   },
   (table) => ({
     orderItemUniqueIdx: uniqueIndex("order_items_order_menu_item_idx").on(

@@ -57,6 +57,8 @@ export const menuItemSchema = z.object({
   isHidden: z.boolean(),
   experimentKey: z.string(),
   experimentVariant: z.string(),
+  purchaseCountToday: z.number().int().min(0).optional(),
+  purchaseCountThisWeek: z.number().int().min(0).optional(),
   isCurrentVersion: z.boolean(),
   supersedes: z.string().min(1).nullable().optional(),
   changeReason: z.string().nullable().optional(),
@@ -83,6 +85,7 @@ export const adminUserSchema = z.object({
 export const orderItemSchema = z.object({
   item: menuItemSchema,
   qty: z.number().min(0),
+  addEgg: z.boolean().optional(),
 });
 
 export const orderSchema = z.object({
@@ -98,6 +101,7 @@ export const orderSchema = z.object({
   refundedBy: z.string().min(1).nullable().optional(),
   refundedAt: z.string().min(1).optional(),
   customerNote: z.string(),
+  pickupTime: z.string().optional().default(""),
   cancelReason: z.string(),
   cancelledBy: z.string().min(1).nullable().optional(),
   cancelledAt: z.string().min(1).optional(),

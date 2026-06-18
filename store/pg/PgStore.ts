@@ -27,6 +27,7 @@ import {
   buildMenuExperimentDetail,
   buildMenuExperiments,
 } from "../../shared/menu-experiment-analytics.ts";
+import { attachMenuSalesStats } from "../../shared/menu-sales-stats.ts";
 import type { Store } from "../Store.ts";
 
 interface PgStoreOptions {
@@ -67,10 +68,13 @@ interface SeedData {
   }>;
 }
 
+const EGG_ADDON_PRICE = 15;
+
 function calculateTotal(items: ReadonlyArray<OrderItem>): number {
   return items.reduce((sum, oi) => {
     const unitPrice = oi.item.salePrice ?? oi.item.price;
-    return sum + unitPrice * oi.qty;
+    const addonPrice = oi.addEgg ? EGG_ADDON_PRICE : 0;
+    return sum + (unitPrice + addonPrice) * oi.qty;
   }, 0);
 }
 
@@ -182,11 +186,14 @@ export class PgStore implements Store {
   // ── Menu ────────────────────────────────────────────────────
 
   getMenu(): ReadonlyArray<MenuItem> {
-    return this.menu.filter((item) => !item.isHidden);
+    return attachMenuSalesStats(
+      this.menu.filter((item) => !item.isHidden),
+      this.orders,
+    );
   }
 
   getAdminMenu(): ReadonlyArray<MenuItem> {
-    return this.menu;
+    return attachMenuSalesStats(this.menu, this.orders);
   }
 
   async createMenuItem(input: {
@@ -427,6 +434,7 @@ export class PgStore implements Store {
           : new Date(inserted.refundedAt).toISOString()
         : undefined,
       customerNote: inserted.customerNote ?? "",
+      pickupTime: inserted.pickupTime ?? "",
       cancelReason: inserted.cancelReason ?? "",
       cancelledBy: inserted.cancelledBy,
       cancelledAt: inserted.cancelledAt
@@ -446,7 +454,7 @@ export class PgStore implements Store {
 
   async updateOrderItem(
     orderId: number,
-    input: { userId: string; itemId: string; qty: number },
+    input: { userId: string; itemId: string; qty: number; addEgg?: boolean },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -499,7 +507,7 @@ export class PgStore implements Store {
     if (existingIdx !== -1) {
       await db
         .update(orderItemsTable)
-        .set({ qty: input.qty })
+        .set({ qty: input.qty, addEgg: input.addEgg ?? false })
         .where(
           and(
             eq(orderItemsTable.orderId, orderId),
@@ -507,14 +515,22 @@ export class PgStore implements Store {
           ),
         );
       const target = order.items[existingIdx];
-      if (target) target.qty = input.qty;
+      if (target) {
+        target.qty = input.qty;
+        target.addEgg = input.addEgg ?? false;
+      }
     } else {
       await db.insert(orderItemsTable).values({
         orderId,
         menuItemId: menuItem.id,
         qty: input.qty,
+        addEgg: input.addEgg ?? false,
       });
-      order.items.push({ item: { ...menuItem }, qty: input.qty });
+      order.items.push({
+        item: { ...menuItem },
+        qty: input.qty,
+        addEgg: input.addEgg ?? false,
+      });
     }
 
     order.total = calculateTotal(order.items);
@@ -528,7 +544,7 @@ export class PgStore implements Store {
 
   async submitOrder(
     orderId: number,
-    input: { userId: string; customerNote?: string },
+    input: { userId: string; customerNote?: string; pickupTime?: string },
   ): Promise<
     | { ok: true; order: Order }
     | {
@@ -558,6 +574,7 @@ export class PgStore implements Store {
 
     const submittedAt = new Date().toISOString();
     const customerNote = (input.customerNote ?? "").trim();
+    const pickupTime = (input.pickupTime ?? "").trim();
 
     await db
       .update(ordersTable)
@@ -565,12 +582,14 @@ export class PgStore implements Store {
         status: "submitted",
         submittedAt: new Date(submittedAt),
         customerNote,
+        pickupTime,
       })
       .where(eq(ordersTable.id, orderId));
 
     order.status = "submitted";
     order.submittedAt = submittedAt;
     order.customerNote = customerNote;
+    order.pickupTime = pickupTime;
 
     return { ok: true, order };
   }
@@ -842,6 +861,7 @@ export class PgStore implements Store {
         orderId: orderItemsTable.orderId,
         menuItemId: orderItemsTable.menuItemId,
         qty: orderItemsTable.qty,
+        addEgg: orderItemsTable.addEgg,
         menuId: menuItemsTable.id,
         entityId: menuItemsTable.entityId,
         logicalId: menuItemsTable.logicalId,
@@ -900,6 +920,8 @@ export class PgStore implements Store {
           isHidden: row.isHidden,
           experimentKey: row.experimentKey,
           experimentVariant: row.experimentVariant,
+          purchaseCountToday: 0,
+          purchaseCountThisWeek: 0,
           isCurrentVersion: row.isCurrentVersion,
           supersedes: row.supersedes,
           changeReason: row.changeReason,
@@ -910,6 +932,7 @@ export class PgStore implements Store {
           createdBy: row.createdBy,
         },
         qty: row.qty,
+        addEgg: row.addEgg,
       });
       itemsByOrderId.set(row.orderId, items);
     }
@@ -935,6 +958,7 @@ export class PgStore implements Store {
           : new Date(row.refundedAt).toISOString()
         : undefined,
       customerNote: row.customerNote ?? "",
+      pickupTime: row.pickupTime ?? "",
       cancelReason: row.cancelReason ?? "",
       cancelledBy: row.cancelledBy,
       cancelledAt: row.cancelledAt

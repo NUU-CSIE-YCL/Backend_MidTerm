@@ -62,6 +62,8 @@ export function toMenuItem(row: MenuRow): MenuItem {
     isHidden: row.isHidden,
     experimentKey: row.experimentKey,
     experimentVariant: row.experimentVariant,
+    purchaseCountToday: 0,
+    purchaseCountThisWeek: 0,
     isCurrentVersion: row.isCurrentVersion,
     supersedes: row.supersedes,
     changeReason: row.changeReason,

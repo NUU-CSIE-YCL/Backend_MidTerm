@@ -407,6 +407,10 @@ export default function App() {
   const [isClearingCart, setIsClearingCart] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [customerNote, setCustomerNote] = useState("");
+  const [pickupTime, setPickupTime] = useState("");
+  const [addEggByItemId, setAddEggByItemId] = useState<Record<string, boolean>>(
+    {},
+  );
   const [menuForm, setMenuForm] = useState<MenuFormState>(() =>
     createEmptyMenuForm(),
   );
@@ -1129,6 +1133,7 @@ export default function App() {
           itemId,
           qty,
           item,
+          addEgg: false,
           isUnavailable: !currentItem || !item.isCurrentVersion,
           subtotal: getEffectiveMenuPrice(item) * qty,
         };
@@ -2049,7 +2054,7 @@ export default function App() {
     }
   }
 
-  async function addToCart(item: MenuItem): Promise<void> {
+  async function addToCart(item: MenuItem, addEgg = false): Promise<void> {
     setActionError("");
     setActiveItemId(item.id);
 
@@ -2223,7 +2228,10 @@ export default function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ customerNote: customerNote.trim() }),
+          body: JSON.stringify({
+            customerNote: customerNote.trim(),
+            pickupTime: pickupTime.trim(),
+          }),
         },
       );
 
@@ -2438,8 +2446,8 @@ export default function App() {
                     />
                   </label>
 
-                  <button
-                    className="btn btn-primary btn-sm"
+                        <button
+                          className="btn btn-primary btn-sm"
                     disabled={isSubmittingRoleRequest}
                     type="submit"
                   >
@@ -3205,6 +3213,12 @@ export default function App() {
 
                       <p className="mb-3 rounded bg-base-100 px-3 py-2 text-sm">
                         備註：{order.customerNote || "無備註"}
+                      </p>
+                      <p className="text-sm opacity-70">
+                        取餐時間：{order.pickupTime || "未指定"}
+                      </p>
+                      <p className="text-sm opacity-70">
+                        取餐時間：{order.pickupTime || "未指定"}
                       </p>
 
                       {order.status === "cancelled" ? (
@@ -4102,7 +4116,7 @@ export default function App() {
                         <button
                           className="btn btn-sm btn-primary"
                           onClick={() => {
-                            void addToCart(item);
+                              void addToCart(item, addEggByItemId[item.id] ?? false);
                           }}
                           disabled={activeItemId === item.id || item.isSoldOut}
                         >
@@ -4308,6 +4322,15 @@ export default function App() {
                 <span className="label-text-alt text-right">
                   {customerNote.length}/120
                 </span>
+              </label>
+              <label className="form-control">
+                <span className="label-text text-sm">取餐時間</span>
+                <input
+                  className="input input-bordered"
+                  onChange={(event) => setPickupTime(event.target.value)}
+                  type="datetime-local"
+                  value={pickupTime}
+                />
               </label>
               <button
                 className="btn btn-error btn-outline w-full"

@@ -231,6 +231,7 @@ export const updateOrderParamsSchema = z.object({
 export const updateOrderBodySchema = z.object({
   itemId: z.string().min(1),
   qty: z.number().min(0),
+  addEgg: z.boolean().optional().default(false),
 });
 
 /** POST /api/orders/:id/submit */
@@ -241,6 +242,7 @@ export const submitOrderParamsSchema = z.object({
 export const submitOrderBodySchema = z
   .object({
     customerNote: z.string().trim().max(120).optional(),
+    pickupTime: z.string().trim().max(40).optional(),
   })
   .optional()
   .default({});

@@ -1785,10 +1785,14 @@ app.post(
   async ({ params, body, request, set }) => {
     const user = await requireUser(request);
     const orderId = parseInt(params.id, 10);
-    const submitBody = (body ?? {}) as { customerNote?: string };
+    const submitBody = (body ?? {}) as {
+      customerNote?: string;
+      pickupTime?: string;
+    };
     const result = await store.submitOrder(orderId, {
       userId: user.id,
       customerNote: submitBody.customerNote,
+      pickupTime: submitBody.pickupTime,
     });
 
     if (!("code" in result)) {
